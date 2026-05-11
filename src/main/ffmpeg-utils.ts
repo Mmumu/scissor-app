@@ -651,7 +651,7 @@ export async function transformVideo(
   const needsComplex = needsTemporal || stickers.length > 0 || bottomR > 0 || !!opts.lut3dPath
   const vFingerprint = buildFingerprintVFilters(opts)
   const aFingerprint = buildAudioFilters(opts)
-  const encodeArgs = ['-c:v', 'libx264', '-preset', 'medium', '-crf', String(opts.crf ?? 23), '-movflags', '+faststart', '-y']
+  const encodeArgs = ['-c:v', 'libx264', '-preset', 'medium', '-crf', String(opts.crf ?? 23), '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-y']
 
   let mainOut: string
   if (needsConcat) {
