@@ -23,6 +23,7 @@ declare global {
       ) => Promise<[VideoInfo, VideoInfo]>
       pickSavePath: (defaultName?: string) => Promise<string | undefined>
       checkFfmpeg: () => Promise<{ ok: boolean; ffmpeg?: string; ffprobe?: string; error?: string }>
+      getLuts: () => Promise<{ name: string; path: string }[]>
       dedupeScan: (paths: string[]) => Promise<{ ok: boolean; groups?: DedupeGroup[]; error?: string }>
       ffprobeDuration: (path: string) => Promise<{ ok: boolean; durationSec?: number; error?: string }>
       exportTimeline: (

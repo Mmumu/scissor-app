@@ -98,6 +98,8 @@ export default function App() {
   const [dragOver, setDragOver] = useState(false)
   const dropRef = useRef<HTMLDivElement>(null)
 
+  const [luts, setLuts] = useState<{name: string, path: string}[]>([])
+
   useEffect(() => {
     window.scissor.checkFfmpeg().then((r) => {
       setFfmpegOk(r.ok)
@@ -106,6 +108,9 @@ export default function App() {
           ? `ffmpeg 已就绪 · ${r.ffmpeg}`
           : (r.error ?? 'ffmpeg 不可用，请按提示安装 FFmpeg/ffprobe 或检查应用是否完整。')
       )
+    })
+    window.scissor.getLuts().then((list) => {
+      if (list && list.length > 0) setLuts(list)
     })
   }, [])
 
@@ -679,6 +684,32 @@ export default function App() {
                         </button>
                       </label>
                       <div className="opt-desc">各色彩通道产生极小的不规则偏移，破坏色彩直方图</div>
+                    </div>
+
+                    <div className="opt-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <label className="opt-label" style={{ marginBottom: 0 }}>
+                          <span>LUT 电影滤镜</span>
+                        </label>
+                        <select
+                          className="ghost-btn"
+                          style={{ padding: '2px 8px', outline: 'none', background: 'var(--bg1)', color: 'var(--fg1)' }}
+                          value={opts.lut3dPath || ''}
+                          onChange={(e) => setOpt('lut3dPath', e.target.value || undefined)}
+                        >
+                          <option value="">(无滤镜)</option>
+                          {luts.map((l) => (
+                            <option key={l.path} value={l.path}>
+                              {l.name === 'bw' ? '黑白 (B&W)' :
+                               l.name === 'sepia' ? '复古 (Sepia)' :
+                               l.name === 'warm' ? '暖色调 (Warm)' :
+                               l.name === 'cool' ? '冷色调 (Cool)' :
+                               l.name === 'contrast' ? '高对比度 (Contrast)' : l.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="opt-desc">应用高级 3D LUT 调色。可把 `.cube` 文件放在 resources/luts 目录下扩充</div>
                     </div>
 
                     <div className="opt-row">

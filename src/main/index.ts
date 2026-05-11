@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { BrowserWindow, app, dialog, ipcMain } from 'electron'
 import { runDedupe } from './dedupe'
@@ -78,6 +78,20 @@ ipcMain.handle('readStickerPreview', async (_e, filePath: string) => {
     return `data:${mime};base64,${buf.toString('base64')}`
   } catch {
     return null
+  }
+})
+ipcMain.handle('getLuts', () => {
+  let lutsDir = join(__dirname, '../../resources/luts')
+  if (app.isPackaged) {
+    lutsDir = join(process.resourcesPath, 'luts')
+  }
+  if (!existsSync(lutsDir)) return []
+  try {
+    return readdirSync(lutsDir)
+      .filter((f) => f.toLowerCase().endsWith('.cube'))
+      .map((f) => ({ name: f.replace(/\.cube$/i, ''), path: join(lutsDir, f) }))
+  } catch {
+    return []
   }
 })
 

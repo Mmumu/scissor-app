@@ -453,6 +453,12 @@ function buildFingerprintVFilters(opts: TransformOptions): string[] {
     vFilters.push(`unsharp=3:3:${opts.unsharp.toFixed(2)}:3:3:0`)
   }
   if (opts.noise > 0) vFilters.push(`noise=alls=${opts.noise}:allf=t+u`)
+  
+  if (opts.lut3dPath && existsSync(opts.lut3dPath)) {
+    const escapedPath = opts.lut3dPath.replace(/\\/g, '/').replace(/:/g, '\\:')
+    vFilters.push(`lut3d=${escapedPath}`)
+  }
+
   vFilters.push('format=yuv420p')
   return vFilters
 }

@@ -65,6 +65,8 @@ export type TransformOptions = {
   introVideoPath?: string
   /** 成片最后拼接的短片 */
   outroVideoPath?: string
+  /** LUT 滤镜文件相对路径或绝对路径 */
+  lut3dPath?: string
 }
 
 /** 贴纸（图片叠层） */

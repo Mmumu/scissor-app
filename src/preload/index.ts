@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('scissor', {
     ipcRenderer.invoke('pickSavePath', defaultName),
   checkFfmpeg: (): Promise<{ ok: boolean; ffmpeg?: string; ffprobe?: string; error?: string }> =>
     ipcRenderer.invoke('checkFfmpeg'),
+  getLuts: (): Promise<{ name: string; path: string }[]> => ipcRenderer.invoke('getLuts'),
   dedupeScan: (paths: string[]): Promise<{ ok: boolean; groups?: DedupeGroup[]; error?: string }> =>
     ipcRenderer.invoke('dedupeScan', paths),
   ffprobeDuration: (path: string): Promise<{ ok: boolean; durationSec?: number; error?: string }> =>
