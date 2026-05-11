@@ -1,0 +1,24 @@
+---
+description: React renderer and shared types conventions
+globs: src/renderer/**/*.{ts,tsx},src/shared/**/*.ts
+alwaysApply: false
+---
+
+# Renderer & shared types
+
+## API surface
+
+- Call **`window.scissor`** only (no raw `ipcRenderer` in renderer). It is injected by preload.
+- Import domain types from **`../../shared/types`** (path depends on file depth under `src/renderer/`).
+
+## Types & defaults
+
+- **`TransformOptions`** and related types live in `src/shared/types.ts`. When adding fields:
+  - Extend the type there.
+  - Update **`DEFAULT_OPTS`** (or equivalent) in the UI.
+  - Update **ffmpeg** construction in `src/main/ffmpeg-utils.ts` if the option affects export.
+
+## UI code
+
+- Functional components + hooks; strict TS (`noEmit` + `strict` in root `tsconfig.json`).
+- Match existing patterns in `App.tsx` for state, status enums, and ffmpeg readiness checks.

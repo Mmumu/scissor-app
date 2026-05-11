@@ -1,0 +1,10 @@
+node_modules
+out
+dist
+release
+resources/win/*.exe
+*.log
+.DS_Store
+*.zip
+贴纸/
+test_*

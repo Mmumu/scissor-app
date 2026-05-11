@@ -1,0 +1,25 @@
+---
+description: Main process and preload IPC patterns for scissor-app
+globs: src/main/**/*.ts,src/preload/**/*.ts
+alwaysApply: false
+---
+
+# Main & preload
+
+## Security & wiring
+
+- Renderer has `contextIsolation: true`; expose APIs only via **`src/preload/index.ts`** (`contextBridge.exposeInMainWorld('scissor', …)`).
+- Preload path is wired in `BrowserWindow` `webPreferences.preload` (built to `out/preload/index.js`).
+- Prefer **`ipcMain.handle`** + **`ipcRenderer.invoke`** for async request/response (already the project style).
+
+## Adding or changing IPC
+
+1. Add `ipcMain.handle('channelName', …)` in `src/main/index.ts` (or a module it imports).
+2. Mirror with `ipcRenderer.invoke('channelName', …)` on `contextBridge.exposeInMainWorld('scissor', { … })`.
+3. Type payloads using **`src/shared/types.ts`** where possible; avoid `any` on boundaries.
+4. Update **`Window.scissor`** in the renderer (e.g. `App.tsx` `declare global`) so TS matches preload — keep the two lists aligned.
+
+## Style
+
+- Use Node **`node:`** imports (`node:path`, `node:fs`, …) in main when touching Node APIs.
+- User-facing errors in this repo are often **Chinese**; keep tone consistent with existing strings.

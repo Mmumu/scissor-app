@@ -1,0 +1,29 @@
+---
+description: Scissor app stack, layout, and build workflow (always read first)
+alwaysApply: true
+---
+
+# Scissor (scissor-app)
+
+macOS-first **Electron** desktop app: local video dedupe, timeline cut/export, and ffmpeg-based transforms (speed/hue/stickers/etc.). Heavy work stays in the **main** process; UI is **React 18** + **TypeScript strict**.
+
+## Layout
+
+| Path | Role |
+|------|------|
+| `src/main/` | Main process: `ipcMain`, dialogs, `ffmpeg-utils`, `dedupe`, `export-timeline` |
+| `src/preload/` | `contextBridge` → `window.scissor` |
+| `src/renderer/` | Vite + React UI (`src/renderer/index.html` entry) |
+| `src/shared/types.ts` | Types shared by main / preload / renderer |
+| `resources/` | Bundled assets (e.g. logos); packaged path vs dev differs in main |
+| `out/` | **Build output — never edit by hand.** Change `src/` and run `npm run build` |
+
+## Commands
+
+- Dev: `npm run dev` (electron-vite)
+- Build: `npm run build`
+- Run packaged main: `npm start` → loads `out/main/index.js` per `package.json`
+
+## Runtime deps
+
+Uses **system** `ffmpeg` / `ffprobe` (PATH / Homebrew). Main resolves binaries via `resolveBinariesSync()` in `ffmpeg-utils.ts`.
