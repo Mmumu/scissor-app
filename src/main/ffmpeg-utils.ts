@@ -728,8 +728,8 @@ export async function transformVideo(
         currentBase = '[vlut]'
       } else if (intensity > 0.01) {
         fcParts.push(`${currentBase}split=2[vlut_orig][vlut_target]`)
-        fcParts.push(`[vlut_target]lut3d=${escapedPath},format=yuva420p,colorchannelmixer=aa=${intensity.toFixed(4)}[vlut_alpha]`)
-        fcParts.push(`[vlut_orig][vlut_alpha]overlay=shortest=1[vlut_out]`)
+        fcParts.push(`[vlut_target]lut3d=${escapedPath}[vlut_lut]`)
+        fcParts.push(`[vlut_lut][vlut_orig]blend=all_opacity=${intensity.toFixed(4)}[vlut_out]`)
         currentBase = '[vlut_out]'
       }
     }
