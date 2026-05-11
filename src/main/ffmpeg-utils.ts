@@ -736,7 +736,12 @@ export async function transformVideo(
       }
     }
 
-    const extraInputs: string[] = stickers.flatMap((s) => ['-loop', '1', '-i', s.imagePath])
+    const extraInputs: string[] = stickers.flatMap((s) => {
+      if (s.imagePath.toLowerCase().endsWith('.gif')) {
+        return ['-ignore_loop', '0', '-i', s.imagePath]
+      }
+      return ['-loop', '1', '-i', s.imagePath]
+    })
 
     /** 按比例缩放贴纸时用源视频偶数宽度（避免 scale2ref + loop 图片触发编码器无帧） */
     let stickerRefW: number | null = null

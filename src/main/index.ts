@@ -56,7 +56,7 @@ ipcMain.handle('pickVideos', async () => {
 ipcMain.handle('pickImage', async () => {
   const r = await dialog.showOpenDialog({
     properties: ['openFile'],
-    filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg'] }]
+    filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'gif'] }]
   })
   if (r.canceled) return undefined
   return r.filePaths[0]
@@ -74,6 +74,7 @@ ipcMain.handle('readStickerPreview', async (_e, filePath: string) => {
     let mime = 'image/png'
     if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) mime = 'image/jpeg'
     else if (lower.endsWith('.webp')) mime = 'image/webp'
+    else if (lower.endsWith('.gif')) mime = 'image/gif'
     return `data:${mime};base64,${buf.toString('base64')}`
   } catch {
     return null
