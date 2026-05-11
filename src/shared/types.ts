@@ -67,6 +67,8 @@ export type TransformOptions = {
   outroVideoPath?: string
   /** LUT 滤镜文件相对路径或绝对路径 */
   lut3dPath?: string
+  /** LUT 滤镜强度 0.0 ~ 1.0 */
+  lut3dIntensity?: number
 }
 
 /** 贴纸（图片叠层） */

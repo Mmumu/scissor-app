@@ -453,12 +453,6 @@ function buildFingerprintVFilters(opts: TransformOptions): string[] {
     vFilters.push(`unsharp=3:3:${opts.unsharp.toFixed(2)}:3:3:0`)
   }
   if (opts.noise > 0) vFilters.push(`noise=alls=${opts.noise}:allf=t+u`)
-  
-  if (opts.lut3dPath && existsSync(opts.lut3dPath)) {
-    const escapedPath = opts.lut3dPath.replace(/\\/g, '/').replace(/:/g, '\\:')
-    vFilters.push(`lut3d=${escapedPath}`)
-  }
-
   vFilters.push('format=yuv420p')
   return vFilters
 }
@@ -725,6 +719,20 @@ export async function transformVideo(
     fcParts.push(`${vSrc}${vFingerprint.join(',')}[vfp]`)
 
     let currentBase = '[vfp]'
+
+    if (opts.lut3dPath && existsSync(opts.lut3dPath)) {
+      const escapedPath = opts.lut3dPath.replace(/\\/g, '/').replace(/:/g, '\\:')
+      const intensity = opts.lut3dIntensity ?? 1.0
+      if (intensity >= 0.99) {
+        fcParts.push(`${currentBase}lut3d=${escapedPath}[vlut]`)
+        currentBase = '[vlut]'
+      } else if (intensity > 0.01) {
+        fcParts.push(`${currentBase}split=2[vlut_orig][vlut_target]`)
+        fcParts.push(`[vlut_target]lut3d=${escapedPath},format=yuva420p,colorchannelmixer=aa=${intensity.toFixed(4)}[vlut_alpha]`)
+        fcParts.push(`[vlut_orig][vlut_alpha]overlay=shortest=1[vlut_out]`)
+        currentBase = '[vlut_out]'
+      }
+    }
 
     if (bottomR > 0) {
       const r = Math.min(0.5, bottomR).toFixed(3)

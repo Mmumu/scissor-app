@@ -24,7 +24,8 @@ const DEFAULT_OPTS: TransformOptions = {
   trimEndSec: 0,
   middleRemoveSec: 0,
   introVideoPath: undefined,
-  outroVideoPath: undefined
+  outroVideoPath: undefined,
+  lut3dIntensity: 1.0
 }
 
 function basename(p: string) {
@@ -709,7 +710,23 @@ export default function App() {
                           ))}
                         </select>
                       </div>
-                      <div className="opt-desc">应用高级 3D LUT 调色。可把 `.cube` 文件放在 resources/luts 目录下扩充</div>
+                      {opts.lut3dPath && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
+                          <span style={{ fontSize: 13, color: 'var(--fg2)', whiteSpace: 'nowrap' }}>
+                            滤镜强度 {((opts.lut3dIntensity ?? 1.0) * 100).toFixed(0)}%
+                          </span>
+                          <input
+                            type="range"
+                            className="slider"
+                            min="0"
+                            max="1"
+                            step="0.05"
+                            value={opts.lut3dIntensity ?? 1.0}
+                            onChange={(e) => setOpt('lut3dIntensity', Number(e.target.value))}
+                          />
+                        </div>
+                      )}
+                      <div className="opt-desc" style={{ marginTop: 8 }}>应用高级 3D LUT 调色。可把 `.cube` 文件放在 resources/luts 目录下扩充</div>
                     </div>
 
                     <div className="opt-row">
