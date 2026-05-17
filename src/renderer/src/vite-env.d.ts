@@ -26,6 +26,7 @@ declare global {
       getLuts: () => Promise<{ name: string; path: string }[]>
       dedupeScan: (paths: string[]) => Promise<{ ok: boolean; groups?: DedupeGroup[]; error?: string }>
       ffprobeDuration: (path: string) => Promise<{ ok: boolean; durationSec?: number; error?: string }>
+      getVideoDims: (path: string) => Promise<{ ok: boolean; w?: number; h?: number; error?: string }>
       exportTimeline: (
         clips: TimelineClip[],
         outPath: string
@@ -35,6 +36,29 @@ declare global {
         outputPath: string,
         opts: TransformOptions
       ) => Promise<{ ok: boolean; error?: string }>
+      pickDirectory: () => Promise<string | undefined>
+      stitchVideo: (
+        mainPath: string,
+        insertPath: string,
+        outputPath: string,
+        insertSizePx: number,
+        insertPositions: { side: 'top' | 'bottom' | 'left' | 'right'; offsetPx: number }[],
+        obfOpts?: { 
+          flip?: boolean; 
+          colorNoise?: boolean; 
+          audioObf?: boolean; 
+          speedJitter?: boolean;
+          trimStart?: boolean;
+          hueSat?: boolean;
+          cleanMeta?: boolean;
+          blurSharpen?: boolean;
+          audioEQ?: boolean;
+          bottomCoverRatio?: number;
+          bottomCoverType?: 'blur' | 'black' | 'crop';
+          stickers?: import('../../shared/types').StickerItem[] 
+        }
+      ) => Promise<{ ok: boolean; error?: string }>
+      onFfmpegProgress: (callback: (info: { file: string; time: string; speed: string; raw: string }) => void) => () => void
     }
   }
 }

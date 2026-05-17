@@ -118,3 +118,5 @@ export type CompareVideosOptions = {
   /** 默认 false；开启后会全文读取两份文件算 MD5，大文件很慢 */
   md5?: boolean
 }
+
+

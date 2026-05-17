@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('scissor', {
     ipcRenderer.invoke('compareVideos', path1, path2, opts),
   pickSavePath: (defaultName?: string): Promise<string | undefined> =>
     ipcRenderer.invoke('pickSavePath', defaultName),
+  pickDirectory: (): Promise<string | undefined> =>
+    ipcRenderer.invoke('pickDirectory'),
   checkFfmpeg: (): Promise<{ ok: boolean; ffmpeg?: string; ffprobe?: string; error?: string }> =>
     ipcRenderer.invoke('checkFfmpeg'),
   getLuts: (): Promise<{ name: string; path: string }[]> => ipcRenderer.invoke('getLuts'),
@@ -25,6 +27,8 @@ contextBridge.exposeInMainWorld('scissor', {
     ipcRenderer.invoke('dedupeScan', paths),
   ffprobeDuration: (path: string): Promise<{ ok: boolean; durationSec?: number; error?: string }> =>
     ipcRenderer.invoke('ffprobeDuration', path),
+  getVideoDims: (path: string): Promise<{ ok: boolean; w?: number; h?: number; error?: string }> =>
+    ipcRenderer.invoke('getVideoDims', path),
   exportTimeline: (
     clips: TimelineClip[],
     outPath: string
@@ -35,5 +39,34 @@ contextBridge.exposeInMainWorld('scissor', {
     outputPath: string,
     opts: TransformOptions
   ): Promise<{ ok: boolean; error?: string }> =>
-    ipcRenderer.invoke('transformVideo', inputPath, outputPath, opts)
+    ipcRenderer.invoke('transformVideo', inputPath, outputPath, opts),
+  stitchVideo: (
+    mainPath: string,
+    insertPath: string,
+    outputPath: string,
+    insertSizePx: number,
+    insertPositions: { side: 'top' | 'bottom' | 'left' | 'right'; offsetPx: number }[],
+    obfOpts?: { 
+      flip?: boolean; 
+      colorNoise?: boolean; 
+      audioObf?: boolean; 
+      speedJitter?: boolean;
+      trimStart?: boolean;
+      hueSat?: boolean;
+      cleanMeta?: boolean;
+      blurSharpen?: boolean;
+      audioEQ?: boolean;
+      bottomCoverRatio?: number;
+      bottomCoverType?: 'blur' | 'black' | 'crop';
+      stickers?: import('../shared/types').StickerItem[] 
+    }
+  ): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('stitchVideo', mainPath, insertPath, outputPath, insertSizePx, insertPositions, obfOpts),
+  onFfmpegProgress: (callback: (info: { file: string; time: string; speed: string; raw: string }) => void) => {
+    const listener = (_e: any, info: any) => callback(info)
+    ipcRenderer.on('ffmpeg-progress', listener)
+    return () => {
+      ipcRenderer.removeListener('ffmpeg-progress', listener)
+    }
+  }
 })

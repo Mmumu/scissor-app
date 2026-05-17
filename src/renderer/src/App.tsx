@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DedupeGroup, StickerItem, TransformOptions, VideoInfo } from '../../shared/types'
 import { buildCompareRows, md5SameFile, metadataSimilarityPercent } from './video-compare'
+import { StitchPanel } from './components/StitchPanel'
+
 
 const DEFAULT_OPTS: TransformOptions = {
   speed: 1.005,
@@ -65,19 +67,19 @@ function StickerThumb({ filePath }: { filePath: string }) {
 
 type Status = 'idle' | 'processing' | 'done' | 'error'
 
-type MainTab = 'transform' | 'compare' | 'dedupe'
+type MainTab = 'transform' | 'compare' | 'dedupe' | 'stitch'
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<MainTab>('transform')
   const [ffmpegOk, setFfmpegOk] = useState(false)
   const [ffmpegMsg, setFfmpegMsg] = useState('正在检测 ffmpeg…')
 
-  const [inputPath, setInputPath] = useState<string | null>(null)
+  const [inputPaths, setInputPaths] = useState<string[]>([])
   const [opts, setOpts] = useState<TransformOptions>(DEFAULT_OPTS)
 
   const [status, setStatus] = useState<Status>('idle')
+  const [processingPath, setProcessingPath] = useState<string | null>(null)
   const [errMsg, setErrMsg] = useState('')
-  const [outputPath, setOutputPath] = useState<string | null>(null)
 
   const [compareA, setCompareA] = useState<string | null>(null)
   const [compareB, setCompareB] = useState<string | null>(null)
@@ -116,14 +118,23 @@ export default function App() {
   }, [])
 
   const pickInput = useCallback(async () => {
+    if (status === 'processing') return
     const paths = await window.scissor.pickVideos()
-    if (paths?.[0]) {
-      setInputPath(paths[0])
+    if (paths && paths.length > 0) {
+      // Append to list instead of overwrite
+      setInputPaths((prev) => {
+        const newPaths = [...prev, ...paths]
+        return [...new Set(newPaths)]
+      })
       setStatus('idle')
-      setOutputPath(null)
       setErrMsg('')
     }
-  }, [])
+  }, [status])
+
+  const removeInputPath = useCallback((p: string) => {
+    if (status === 'processing') return
+    setInputPaths((prev) => prev.filter((x) => x !== p))
+  }, [status])
 
   const pickCompareLeft = useCallback(async () => {
     const paths = await window.scissor.pickVideos()
@@ -206,18 +217,19 @@ export default function App() {
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
+    if (status === 'processing') return
     setDragOver(false)
-    const file = e.dataTransfer.files[0]
-    if (file) {
-      const p = (file as unknown as { path: string }).path
-      if (p) {
-        setInputPath(p)
-        setStatus('idle')
-        setOutputPath(null)
-        setErrMsg('')
-      }
+    const files = Array.from(e.dataTransfer.files)
+    const paths = files.map(f => (f as unknown as { path: string }).path).filter(Boolean)
+    if (paths.length > 0) {
+      setInputPaths((prev) => {
+        const newPaths = [...prev, ...paths]
+        return [...new Set(newPaths)]
+      })
+      setStatus('idle')
+      setErrMsg('')
     }
-  }, [])
+  }, [status])
 
   const setOpt = <K extends keyof TransformOptions>(k: K, v: TransformOptions[K]) =>
     setOpts((prev) => ({ ...prev, [k]: v }))
@@ -273,27 +285,52 @@ export default function App() {
   }, [])
 
   const run = useCallback(async () => {
-    if (!inputPath) return
-    const ext = inputPath.match(/\.(\w+)$/)?.[1] ?? 'mp4'
-    const name = basename(inputPath).replace(/\.\w+$/, '') + '_out.' + ext
-    const out = await window.scissor.pickSavePath(name)
-    if (!out) return
+    if (inputPaths.length === 0) return
+
+    let outDirOrPath: string | undefined
+    if (inputPaths.length > 1) {
+      outDirOrPath = await window.scissor.pickDirectory()
+      if (!outDirOrPath) return
+    } else {
+      const p = inputPaths[0]
+      const ext = p.match(/\.(\w+)$/)?.[1] ?? 'mp4'
+      const name = basename(p).replace(/\.\w+$/, '') + '_out.' + ext
+      outDirOrPath = await window.scissor.pickSavePath(name)
+      if (!outDirOrPath) return
+    }
 
     setStatus('processing')
     setErrMsg('')
-    setOutputPath(null)
 
-    const r = await window.scissor.transformVideo(inputPath, out, opts)
-    if (r.ok) {
-      setStatus('done')
-      setOutputPath(out)
-    } else {
+    try {
+      if (inputPaths.length === 1) {
+        setProcessingPath(inputPaths[0])
+        const r = await window.scissor.transformVideo(inputPaths[0], outDirOrPath!, opts)
+        if (!r.ok) throw new Error(r.error || '处理失败')
+        setInputPaths([])
+      } else {
+        const outDir = outDirOrPath!.replace(/[/\\]$/, '')
+        const pathsToProcess = [...inputPaths]
+        for (const p of pathsToProcess) {
+          setProcessingPath(p)
+          const ext = p.match(/\.(\w+)$/)?.[1] ?? 'mp4'
+          const name = basename(p).replace(/\.\w+$/, '') + '_out.' + ext
+          const outPath = `${outDir}/${name}`
+          const r = await window.scissor.transformVideo(p, outPath, opts)
+          if (!r.ok) throw new Error(r.error || '处理失败')
+          setInputPaths((prev) => prev.filter((x) => x !== p))
+        }
+      }
+      setStatus('idle')
+      setProcessingPath(null)
+    } catch (e: any) {
       setStatus('error')
-      setErrMsg(r.error ?? '处理失败')
+      setProcessingPath(null)
+      setErrMsg(e.message || String(e))
     }
-  }, [inputPath, opts])
+  }, [inputPaths, opts])
 
-  const isReady = ffmpegOk && !!inputPath && status !== 'processing'
+  const isReady = ffmpegOk && inputPaths.length > 0
 
   return (
     <div className="app">
@@ -346,6 +383,15 @@ export default function App() {
           >
             去重
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'stitch'}
+            className={`main-tab ${activeTab === 'stitch' ? 'active' : ''}`}
+            onClick={() => setActiveTab('stitch')}
+          >
+            分割混剪
+          </button>
         </nav>
 
         {activeTab === 'transform' && (
@@ -356,27 +402,56 @@ export default function App() {
             <h2 className="panel-title">① 选择源视频</h2>
             <div
               ref={dropRef}
-              className={`dropzone ${dragOver ? 'drag-over' : ''} ${inputPath ? 'has-file' : ''}`}
+              className={`dropzone ${dragOver ? 'drag-over' : ''} ${inputPaths.length > 0 ? 'has-file' : ''} ${status === 'processing' ? 'disabled' : ''}`}
               onClick={pickInput}
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+              onDragOver={(e) => { e.preventDefault(); if (status !== 'processing') setDragOver(true) }}
               onDragLeave={() => setDragOver(false)}
               onDrop={handleDrop}
             >
-              {inputPath ? (
+              {inputPaths.length > 0 ? (
                 <>
                   <div className="file-icon">🎬</div>
-                  <div className="file-name">{basename(inputPath)}</div>
-                  <div className="file-path">{inputPath}</div>
-                  <div className="file-hint">点击或拖入重新选择</div>
+                  <div className="file-name">已选择 {inputPaths.length} 个视频</div>
+                  {status !== 'processing' && <div className="file-hint">点击或拖入继续添加</div>}
                 </>
               ) : (
                 <>
                   <div className="drop-icon">⬆</div>
-                  <div className="drop-label">拖入视频或点击选择</div>
+                  <div className="drop-label">拖入视频或点击选择(支持多选)</div>
                   <div className="drop-hint">支持 mp4 / mov / mkv / m4v / webm / avi</div>
                 </>
               )}
             </div>
+
+            {inputPaths.length > 0 && (
+              <ul className="source-video-list" style={{ marginTop: '16px', listStyle: 'none', padding: 0, overflowY: 'auto', flex: 1 }}>
+                {inputPaths.map(p => (
+                  <li key={p} style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    marginBottom: '8px',
+                    background: processingPath === p ? 'rgba(0,255,100,0.1)' : 'var(--bg1)',
+                    border: processingPath === p ? '1px solid var(--accent1)' : '1px solid transparent',
+                    borderRadius: '6px'
+                  }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', marginRight: '12px' }}>
+                      <span style={{ fontSize: '13px', color: 'var(--fg1)', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{basename(p)}</span>
+                      {processingPath === p && <span style={{ fontSize: '11px', color: 'var(--accent1)' }}>处理中...</span>}
+                    </div>
+                    {status !== 'processing' && (
+                      <button 
+                        className="del-btn" 
+                        onClick={(e) => { e.stopPropagation(); removeInputPath(p); }}
+                        title="移除"
+                        style={{ flexShrink: 0 }}
+                      >×</button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
 
           {/* Middle: Options */}
@@ -1037,29 +1112,19 @@ export default function App() {
                 id="run-btn"
                 type="button"
                 className={`run-btn ${status === 'processing' ? 'busy' : ''}`}
-                disabled={!isReady}
+                disabled={!isReady || status === 'processing'}
                 onClick={run}
               >
                 {status === 'processing' ? (
-                  <><span className="spinner" /> 处理中…</>
-                ) : '开始生成'}
+                  <><span className="spinner" /> 正在处理中…</>
+                ) : inputPaths.length > 1 ? '开始批量处理' : '开始处理'}
               </button>
 
-              {status === 'done' && outputPath && (
-                <div className="result ok">
-                  <div className="result-icon">✅</div>
-                  <div className="result-text">
-                    <strong>生成成功</strong>
-                    <span className="result-path">{outputPath}</span>
-                  </div>
-                </div>
-              )}
-
-              {status === 'error' && (
+              {errMsg && (
                 <div className="result err">
                   <div className="result-icon">❌</div>
                   <div className="result-text">
-                    <strong>处理失败</strong>
+                    <strong>提交任务失败</strong>
                     <span className="result-path">{errMsg}</span>
                   </div>
                 </div>
@@ -1092,10 +1157,10 @@ export default function App() {
                 </ul>
               </div>
             </div>
-          </section>
-            </div>
+            </section>
           </div>
-        )}
+        </div>
+      )}
 
         {activeTab === 'compare' && (
           <div className="tab-panel tab-panel--compare">
@@ -1295,7 +1360,14 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {activeTab === 'stitch' && (
+          <div className="tab-panel tab-panel--stitch">
+            <StitchPanel ffmpegOk={ffmpegOk} />
+          </div>
+        )}
       </main>
     </div>
   )
 }
+

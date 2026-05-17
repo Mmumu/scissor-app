@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { BrowserWindow, app, dialog, ipcMain } from 'electron'
 import { runDedupe } from './dedupe'
 import { exportTimeline } from './export-timeline'
+import { stitchVideo } from './stitch'
 import {
   ffmpegMissingUserHint,
   ffprobeDuration,
@@ -10,6 +11,7 @@ import {
   resolveBinariesSync,
   transformVideo
 } from './ffmpeg-utils'
+
 import type { CompareVideosOptions, TransformOptions, VideoInfo } from '../shared/types'
 
 function createWindow(): BrowserWindow {
@@ -34,6 +36,7 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -62,7 +65,7 @@ ipcMain.handle('pickImage', async () => {
   return r.filePaths[0]
 })
 
-const PREVIEW_MAX_BYTES = 8 * 1024 * 1024
+const PREVIEW_MAX_BYTES = 20 * 1024 * 1024
 
 ipcMain.handle('readStickerPreview', async (_e, filePath: string) => {
   if (typeof filePath !== 'string' || !filePath || !existsSync(filePath)) return null
@@ -121,6 +124,14 @@ ipcMain.handle('pickSavePath', async (_e, defaultName?: string) => {
   return r.filePath
 })
 
+ipcMain.handle('pickDirectory', async () => {
+  const r = await dialog.showOpenDialog({
+    properties: ['openDirectory', 'createDirectory']
+  })
+  if (r.canceled || !r.filePaths) return undefined
+  return r.filePaths[0]
+})
+
 ipcMain.handle('checkFfmpeg', async () => {
   const bins = resolveBinariesSync()
   if (!bins) {
@@ -150,6 +161,19 @@ ipcMain.handle('ffprobeDuration', async (_e, path: string) => {
   }
 })
 
+ipcMain.handle('getVideoDims', async (_e, path: string) => {
+  const bins = resolveBinariesSync()
+  if (!bins) return { ok: false, error: 'ffprobe missing' }
+  try {
+    const { ffprobeVideoDims } = await import('./ffmpeg-utils')
+    const dims = await ffprobeVideoDims(bins.ffprobe, path)
+    if (!dims) return { ok: false, error: 'Could not read dims' }
+    return { ok: true, w: dims.w, h: dims.h }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+})
+
 ipcMain.handle(
   'exportTimeline',
   async (_e, clips: { path: string; startSec: number; endSec: number }[], outPath: string) => {
@@ -170,3 +194,28 @@ ipcMain.handle(
     return await transformVideo(bins.ffmpeg, bins.ffprobe, inputPath, outputPath, opts)
   }
 )
+
+ipcMain.handle(
+  'stitchVideo',
+  async (e, mainPath: string, insertPath: string, outputPath: string, insertSizePx: number, insertPositions: any[], obfOpts?: any) => {
+    const bins = resolveBinariesSync()
+    if (!bins) return { ok: false, error: ffmpegMissingUserHint() }
+    return await stitchVideo(
+      bins.ffmpeg, bins.ffprobe, mainPath, insertPath, outputPath, insertSizePx, insertPositions, obfOpts,
+      (msg) => {
+        const timeMatch = msg.match(/time=(\d{2}:\d{2}:\d{2}\.\d+)/)
+        const speedMatch = msg.match(/speed=\s*([\d.]+x)/)
+        if (timeMatch) {
+          e.sender.send('ffmpeg-progress', { 
+            file: mainPath, 
+            time: timeMatch[1], 
+            speed: speedMatch ? speedMatch[1] : '',
+            raw: msg
+          })
+        }
+      }
+    )
+  }
+)
+
+

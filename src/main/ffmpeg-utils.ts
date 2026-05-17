@@ -379,7 +379,7 @@ function insetPx(s: StickerItem, k: keyof Pick<StickerItem, 'insetTop' | 'insetR
   return Math.max(0, Math.round(n))
 }
 
-function anchorToXY(s: StickerItem): string {
+export function anchorToXY(s: StickerItem): string {
   const L = insetPx(s, 'insetLeft')
   const R = insetPx(s, 'insetRight')
   const T = insetPx(s, 'insetTop')
@@ -400,7 +400,7 @@ function anchorToXY(s: StickerItem): string {
   }
 }
 
-function enableExpr(s: StickerItem): string {
+export function enableExpr(s: StickerItem): string {
   if (s.startSec != null && s.endSec != null)
     return `:enable='between(t,${s.startSec},${s.endSec})'`
   if (s.startSec != null) return `:enable='gte(t,${s.startSec})'`
@@ -408,7 +408,7 @@ function enableExpr(s: StickerItem): string {
   return ''
 }
 
-function buildFingerprintVFilters(opts: TransformOptions): string[] {
+function buildFingerprintVFilters(opts: TransformOptions, srcDims?: { w: number; h: number }): string[] {
   const pts = (1 / opts.speed).toFixed(6)
   const vFilters: string[] = []
   // 隐式叠加极小随机旋转 (±0.3度)，肉眼完全无感，但每次导出都能彻底破坏感知哈希
@@ -417,9 +417,8 @@ function buildFingerprintVFilters(opts: TransformOptions): string[] {
 
   if (Math.abs(finalRotateDeg) > 0.001) {
     const rad = (finalRotateDeg * Math.PI / 180).toFixed(5)
-    // 先放大一点，再旋转并限制输出尺寸，完美切除黑边
-    vFilters.push(`scale=iw*1.04:ih*1.04:flags=bilinear`)
-    vFilters.push(`rotate=${rad}:ow=iw/1.04:oh=ih/1.04:c=black`)
+    // ±0.3° 就地旋转，角落黑边<3px完全不可见，且不改变宽高
+    vFilters.push(`rotate=${rad}:ow=iw:oh=ih:c=black`)
   }
 
   if (opts.randomCrop) {
@@ -428,20 +427,16 @@ function buildFingerprintVFilters(opts: TransformOptions): string[] {
     const T = 2 + Math.floor(Math.random() * 6)
     const B = 2 + Math.floor(Math.random() * 6)
     vFilters.push(`crop=iw-${L}-${R}:ih-${T}-${B}:${L}:${T}`)
-    vFilters.push(`scale=trunc((iw+${L+R})/2)*2:trunc((ih+${T+B})/2)*2:flags=lanczos`)
   } else if (opts.cropPx > 0) {
     const c = opts.cropPx
     vFilters.push(`crop=trunc((iw-${c * 2})/2)*2:trunc((ih-${c * 2})/2)*2:${c}:${c}`)
-    vFilters.push(`scale=trunc((iw+${c * 2})/2)*2:trunc((ih+${c * 2})/2)*2:flags=lanczos`)
-  } else {
-    vFilters.push(`scale=trunc(iw/2)*2:trunc(ih/2)*2`)
   }
 
   if (opts.hflip) vFilters.push('hflip')
   vFilters.push(`setpts=${pts}*PTS`)
   vFilters.push(`hue=h=${opts.hue}:s=${opts.saturation.toFixed(4)}`)
   vFilters.push(`eq=brightness=${opts.brightness.toFixed(4)}:contrast=1.0`)
-  
+
   if (opts.colorMix) {
     const r = (0.99 + Math.random() * 0.02).toFixed(3)
     const g = (0.99 + Math.random() * 0.02).toFixed(3)
@@ -453,6 +448,16 @@ function buildFingerprintVFilters(opts: TransformOptions): string[] {
     vFilters.push(`unsharp=3:3:${opts.unsharp.toFixed(2)}:3:3:0`)
   }
   if (opts.noise > 0) vFilters.push(`noise=alls=${opts.noise}:allf=t+u`)
+
+  // 保底：最终强制还原到源视频的偶数尺寸，彻底消除中间滤镜的浮点取整误差。
+  // 若有源尺寸，精确 scale 回去；否则只做偶数对齐（fallback）。
+  if (srcDims) {
+    const tw = srcDims.w & ~1
+    const th = srcDims.h & ~1
+    vFilters.push(`scale=${tw}:${th}:flags=lanczos`)
+  } else {
+    vFilters.push(`scale=trunc(iw/2)*2:trunc(ih/2)*2`)
+  }
   vFilters.push('format=yuv420p')
   return vFilters
 }
@@ -480,12 +485,13 @@ function buildAudioFilters(opts: TransformOptions): string[] {
   return aFilters
 }
 
-async function spawnFfmpeg(
+export async function spawnFfmpeg(
   ffmpeg: string,
   args: string[],
   onProgress?: (msg: string) => void,
-  timeoutMs = 3_600_000 // 1 hour default
-): Promise<{ ok: boolean; error?: string }> {
+  timeoutMs = 3_600_000, // 1 hour default
+  signal?: AbortSignal
+): Promise<{ ok: boolean; error?: string; aborted?: boolean }> {
   try {
     await new Promise<void>((resolve, reject) => {
       let settled = false
@@ -508,6 +514,14 @@ async function spawnFfmpeg(
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true
       })
+
+      // AbortSignal → kill ffmpeg process
+      const onAbort = () => {
+        try { proc.kill('SIGKILL') } catch { /* ignore */ }
+        done(Object.assign(new Error('aborted'), { aborted: true }))
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
+
       let stderr = ''
       proc.stderr?.on('data', (d: Buffer) => {
         stderr += d.toString()
@@ -515,16 +529,19 @@ async function spawnFfmpeg(
       })
       proc.stdout?.on('data', () => {})
       proc.on('close', (code) => {
+        signal?.removeEventListener('abort', onAbort)
         if (code === 0 || code === null) done()
         else done(new Error(stderr.slice(-1200) || `ffmpeg exit ${code}`))
       })
       proc.on('error', (e) => done(e))
     })
     return { ok: true }
-  } catch (e) {
+  } catch (e: any) {
+    if (e?.aborted) return { ok: false, aborted: true, error: 'cancelled' }
     return { ok: false, error: String(e) }
   }
 }
+
 
 async function concatIntroMainOutro(
   ffmpeg: string,
@@ -534,7 +551,8 @@ async function concatIntroMainOutro(
   outroPath: string | null,
   outputPath: string,
   crf: number,
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  signal?: AbortSignal
 ): Promise<{ ok: boolean; error?: string }> {
   const dims = await ffprobeVideoDims(ffprobe, mainPath)
   if (!dims) return { ok: false, error: '无法读取主成片分辨率' }
@@ -604,7 +622,7 @@ async function concatIntroMainOutro(
 
   onProgress?.(`拼接片头片尾: ffmpeg ${args.join(' ')}`)
 
-  return spawnFfmpeg(ffmpeg, args, onProgress)
+  return spawnFfmpeg(ffmpeg, args, onProgress, 3_600_000, signal)
 }
 
 /**
@@ -616,8 +634,9 @@ export async function transformVideo(
   inputPath: string,
   outputPath: string,
   opts: TransformOptions,
-  onProgress?: (msg: string) => void
-): Promise<{ ok: boolean; error?: string }> {
+  onProgress?: (msg: string) => void,
+  signal?: AbortSignal
+): Promise<{ ok: boolean; error?: string; aborted?: boolean }> {
   const hasAudio = await ffprobeHasAudio(ffprobe, inputPath)
   const stickers = (opts.stickers ?? []).filter((s) => !!s.imagePath)
   const bottomR = opts.bottomCoverRatio || 0
@@ -649,7 +668,12 @@ export async function transformVideo(
   }
 
   const needsComplex = needsTemporal || stickers.length > 0 || bottomR > 0 || !!opts.lut3dPath
-  const vFingerprint = buildFingerprintVFilters(opts)
+  // 提前 probe 源视频尺寸，用于最终 scale 保证输出分辨率与源一致
+  const srcDims = await ffprobeVideoDims(ffprobe, inputPath)
+  const srcW = srcDims ? (srcDims.w & ~1) : 0
+  const srcH = srcDims ? (srcDims.h & ~1) : 0
+  console.error(`[DimDebug] srcDims=${JSON.stringify(srcDims)} srcW=${srcW} srcH=${srcH}`)
+  const vFingerprint = buildFingerprintVFilters(opts, srcDims ?? undefined)
   const aFingerprint = buildAudioFilters(opts)
   const encodeArgs = ['-c:v', 'libx264', '-preset', 'medium', '-crf', String(opts.crf ?? 23), '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-y']
 
@@ -764,12 +788,18 @@ export async function transformVideo(
       stickerRefW = dim ? Math.max(4, dim.w & ~1) : 1920
     }
 
+    // 最终宽度修正：强制输出宽度 = 源视频宽度（偶数），消除中间滤镜浮点误差
+    const finalScaleFilter = srcW > 0
+      ? `scale=${srcW}:trunc(ih/2)*2:flags=lanczos,setsar=1`
+      : `scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1`
+
     if (stickers.length > 0) {
       let pipeBase = currentBase
       stickers.forEach((s, i) => {
         const alpha = Math.min(1, Math.max(0, s.opacity)).toFixed(4)
         const fracRaw = s.widthFrac ?? 0
-        const outTag = i === stickers.length - 1 ? '[out]' : `[o${i}]`
+        const isLast = i === stickers.length - 1
+        const outTag = isLast ? '[vout_pre]' : `[o${i}]`
 
         let scaleChain: string
         if (fracRaw > 0 && stickerRefW != null) {
@@ -785,8 +815,9 @@ export async function transformVideo(
         )
         pipeBase = outTag
       })
+      fcParts.push(`[vout_pre]${finalScaleFilter}[out]`)
     } else {
-      fcParts.push(`${currentBase}copy[out]`)
+      fcParts.push(`${currentBase}${finalScaleFilter}[out]`)
     }
 
     if (hasAudio && aFingerprint.length > 0) {
@@ -813,7 +844,7 @@ export async function transformVideo(
   onProgress?.(`运行: ffmpeg ${args.join(' ')}`)
   console.log(`[FFmpeg Command]: ffmpeg ${args.join(' ')}`)
 
-  const r1 = await spawnFfmpeg(ffmpeg, args, onProgress)
+  const r1 = await spawnFfmpeg(ffmpeg, args, onProgress, 3_600_000, signal)
   if (!r1.ok) return r1
 
   if (!needsConcat) return { ok: true }
@@ -827,7 +858,8 @@ export async function transformVideo(
       outroPath,
       outputPath,
       opts.crf ?? 23,
-      onProgress
+      onProgress,
+      signal
     )
   } finally {
     if (concatWorkDir) {
