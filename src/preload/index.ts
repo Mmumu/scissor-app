@@ -3,23 +3,90 @@ import type {
   CompareVideosOptions,
   DedupeGroup,
   TimelineClip,
-  TransformOptions,
   VideoInfo
 } from '../shared/types'
+import type { ObfuscationOptions } from '../shared/obfuscation'
+import type {
+  AudioMeta,
+  ImportOptions,
+  ImportProgressEvent,
+  LibraryIndex,
+  LibraryStats
+} from '../shared/library'
+import type {
+  MixPreviewRequest,
+  MixPreviewResult,
+  MixProjectMeta,
+  MixRenderProgressEvent,
+  MixRenderRequest,
+  MixRenderResult,
+  MixTimeline
+} from '../shared/mix'
 
-export type { CompareVideosOptions, DedupeGroup, TimelineClip, TransformOptions, VideoInfo }
+export type {
+  CompareVideosOptions,
+  DedupeGroup,
+  TimelineClip,
+  VideoInfo,
+  ObfuscationOptions,
+  AudioMeta,
+  ImportOptions,
+  ImportProgressEvent,
+  LibraryIndex,
+  LibraryStats,
+  MixPreviewRequest,
+  MixPreviewResult,
+  MixProjectMeta,
+  MixRenderProgressEvent,
+  MixRenderRequest,
+  MixRenderResult,
+  MixTimeline
+}
+
+export type InsertSide = 'top' | 'bottom' | 'left' | 'right'
+export type InsertPosition = { side: InsertSide; offsetPx: number }
+
+export type StitchArgs = {
+  mainPath: string
+  insertPath: string
+  outputPath: string
+  insertSizePx: number
+  insertPositions: InsertPosition[]
+  obfuscation: ObfuscationOptions
+}
+
+export type PreviewArgs = {
+  mode: 'transform' | 'stitch'
+  mainPath: string
+  obfuscation: ObfuscationOptions
+  startSec?: number
+  durationSec?: number
+  insertPath?: string
+  insertSizePx?: number
+  insertPositions?: InsertPosition[]
+}
+
+export type PreviewResult = {
+  ok: boolean
+  base64?: string
+  mime?: string
+  durationSec?: number
+  error?: string
+}
 
 contextBridge.exposeInMainWorld('scissor', {
   pickVideos: (): Promise<string[] | undefined> => ipcRenderer.invoke('pickVideos'),
   pickImage: (): Promise<string | undefined> => ipcRenderer.invoke('pickImage'),
   readStickerPreview: (filePath: string): Promise<string | null> =>
     ipcRenderer.invoke('readStickerPreview', filePath),
-  compareVideos: (path1: string, path2: string, opts?: CompareVideosOptions): Promise<[VideoInfo, VideoInfo]> =>
-    ipcRenderer.invoke('compareVideos', path1, path2, opts),
+  compareVideos: (
+    path1: string,
+    path2: string,
+    opts?: CompareVideosOptions
+  ): Promise<[VideoInfo, VideoInfo]> => ipcRenderer.invoke('compareVideos', path1, path2, opts),
   pickSavePath: (defaultName?: string): Promise<string | undefined> =>
     ipcRenderer.invoke('pickSavePath', defaultName),
-  pickDirectory: (): Promise<string | undefined> =>
-    ipcRenderer.invoke('pickDirectory'),
+  pickDirectory: (): Promise<string | undefined> => ipcRenderer.invoke('pickDirectory'),
   checkFfmpeg: (): Promise<{ ok: boolean; ffmpeg?: string; ffprobe?: string; error?: string }> =>
     ipcRenderer.invoke('checkFfmpeg'),
   getLuts: (): Promise<{ name: string; path: string }[]> => ipcRenderer.invoke('getLuts'),
@@ -37,36 +104,76 @@ contextBridge.exposeInMainWorld('scissor', {
   transformVideo: (
     inputPath: string,
     outputPath: string,
-    opts: TransformOptions
+    opts: ObfuscationOptions
   ): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('transformVideo', inputPath, outputPath, opts),
-  stitchVideo: (
-    mainPath: string,
-    insertPath: string,
-    outputPath: string,
-    insertSizePx: number,
-    insertPositions: { side: 'top' | 'bottom' | 'left' | 'right'; offsetPx: number }[],
-    obfOpts?: { 
-      flip?: boolean; 
-      colorNoise?: boolean; 
-      audioObf?: boolean; 
-      speedJitter?: boolean;
-      trimStart?: boolean;
-      hueSat?: boolean;
-      cleanMeta?: boolean;
-      blurSharpen?: boolean;
-      audioEQ?: boolean;
-      bottomCoverRatio?: number;
-      bottomCoverType?: 'blur' | 'black' | 'crop';
-      stickers?: import('../shared/types').StickerItem[] 
-    }
-  ): Promise<{ ok: boolean; error?: string }> =>
-    ipcRenderer.invoke('stitchVideo', mainPath, insertPath, outputPath, insertSizePx, insertPositions, obfOpts),
-  onFfmpegProgress: (callback: (info: { file: string; time: string; speed: string; raw: string }) => void) => {
-    const listener = (_e: any, info: any) => callback(info)
+  stitchVideo: (args: StitchArgs): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('stitchVideo', args),
+  renderPreview: (args: PreviewArgs): Promise<PreviewResult> =>
+    ipcRenderer.invoke('renderPreview', args),
+  onFfmpegProgress: (
+    callback: (info: { file: string; time: string; speed: string; raw: string }) => void
+  ) => {
+    const listener = (_e: unknown, info: unknown) =>
+      callback(info as { file: string; time: string; speed: string; raw: string })
     ipcRenderer.on('ffmpeg-progress', listener)
     return () => {
       ipcRenderer.removeListener('ffmpeg-progress', listener)
+    }
+  },
+
+  // ── 「随心剪」素材池 ───────────────────────────────────
+  library: {
+    list: (): Promise<LibraryIndex> => ipcRenderer.invoke('library:list'),
+    stats: (): Promise<LibraryStats> => ipcRenderer.invoke('library:stats'),
+    pickAudioFile: (): Promise<string | undefined> =>
+      ipcRenderer.invoke('library:pickAudioFile'),
+    importVideos: (opts: ImportOptions): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('library:importVideos', opts),
+    importAudio: (
+      path: string
+    ): Promise<{ ok: boolean; audio?: AudioMeta; error?: string }> =>
+      ipcRenderer.invoke('library:importAudio', path),
+    deleteClips: (ids: string[]): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('library:deleteClips', ids),
+    deleteAudios: (ids: string[]): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('library:deleteAudios', ids),
+    deleteImport: (importId: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('library:deleteImport', importId),
+    readAsBase64: (
+      rel: string
+    ): Promise<{ ok: boolean; base64?: string; mime?: string; error?: string }> =>
+      ipcRenderer.invoke('library:readAsBase64', rel),
+    rootDir: (): Promise<string> => ipcRenderer.invoke('library:rootDir'),
+    onImportProgress: (cb: (ev: ImportProgressEvent) => void) => {
+      const listener = (_e: unknown, ev: unknown) => cb(ev as ImportProgressEvent)
+      ipcRenderer.on('library:import-progress', listener)
+      return () => {
+        ipcRenderer.removeListener('library:import-progress', listener)
+      }
+    }
+  },
+
+  // ── 混剪台 ────────────────────────────────────────────
+  mix: {
+    render: (req: MixRenderRequest): Promise<MixRenderResult> =>
+      ipcRenderer.invoke('mix:render', req),
+    preview: (req: MixPreviewRequest): Promise<MixPreviewResult> =>
+      ipcRenderer.invoke('mix:preview', req),
+    pickOutputPath: (defaultName?: string): Promise<string | undefined> =>
+      ipcRenderer.invoke('mix:pickOutputPath', defaultName),
+    listProjects: (): Promise<MixProjectMeta[]> => ipcRenderer.invoke('mix:listProjects'),
+    saveProject: (name: string, timeline: MixTimeline, id?: string): Promise<MixProjectMeta> =>
+      ipcRenderer.invoke('mix:saveProject', name, timeline, id),
+    loadProject: (id: string): Promise<MixProjectMeta | null> =>
+      ipcRenderer.invoke('mix:loadProject', id),
+    deleteProject: (id: string): Promise<void> => ipcRenderer.invoke('mix:deleteProject', id),
+    onProgress: (cb: (ev: MixRenderProgressEvent) => void) => {
+      const listener = (_e: unknown, ev: unknown) => cb(ev as MixRenderProgressEvent)
+      ipcRenderer.on('mix:progress', listener)
+      return () => {
+        ipcRenderer.removeListener('mix:progress', listener)
+      }
     }
   }
 })

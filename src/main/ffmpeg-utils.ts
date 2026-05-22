@@ -7,7 +7,14 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import { PNG } from 'pngjs'
 import { spawnWithStdout, spawnWithStdoutBuffer } from './spawn-util'
-import type { StickerItem, TransformOptions, VideoInfo } from '../shared/types'
+import type { StickerItem, VideoInfo } from '../shared/types'
+import type { ObfuscationOptions } from '../shared/obfuscation'
+import {
+  buildAudioFingerprintFilters,
+  buildMetadataArgs,
+  buildVideoFingerprintFilters,
+  computeEffectiveTrimStart
+} from './obfuscation-filter'
 
 const require = createRequire(import.meta.url)
 
@@ -408,82 +415,7 @@ export function enableExpr(s: StickerItem): string {
   return ''
 }
 
-function buildFingerprintVFilters(opts: TransformOptions, srcDims?: { w: number; h: number }): string[] {
-  const pts = (1 / opts.speed).toFixed(6)
-  const vFilters: string[] = []
-  // 隐式叠加极小随机旋转 (±0.3度)，肉眼完全无感，但每次导出都能彻底破坏感知哈希
-  const randomJitter = (Math.random() * 0.6) - 0.3
-  const finalRotateDeg = (opts.rotateDeg || 0) + randomJitter
-
-  if (Math.abs(finalRotateDeg) > 0.001) {
-    const rad = (finalRotateDeg * Math.PI / 180).toFixed(5)
-    // ±0.3° 就地旋转，角落黑边<3px完全不可见，且不改变宽高
-    vFilters.push(`rotate=${rad}:ow=iw:oh=ih:c=black`)
-  }
-
-  if (opts.randomCrop) {
-    const L = 2 + Math.floor(Math.random() * 6)
-    const R = 2 + Math.floor(Math.random() * 6)
-    const T = 2 + Math.floor(Math.random() * 6)
-    const B = 2 + Math.floor(Math.random() * 6)
-    vFilters.push(`crop=iw-${L}-${R}:ih-${T}-${B}:${L}:${T}`)
-  } else if (opts.cropPx > 0) {
-    const c = opts.cropPx
-    vFilters.push(`crop=trunc((iw-${c * 2})/2)*2:trunc((ih-${c * 2})/2)*2:${c}:${c}`)
-  }
-
-  if (opts.hflip) vFilters.push('hflip')
-  vFilters.push(`setpts=${pts}*PTS`)
-  vFilters.push(`hue=h=${opts.hue}:s=${opts.saturation.toFixed(4)}`)
-  vFilters.push(`eq=brightness=${opts.brightness.toFixed(4)}:contrast=1.0`)
-
-  if (opts.colorMix) {
-    const r = (0.99 + Math.random() * 0.02).toFixed(3)
-    const g = (0.99 + Math.random() * 0.02).toFixed(3)
-    const b = (0.99 + Math.random() * 0.02).toFixed(3)
-    vFilters.push(`colorchannelmixer=rr=${r}:gg=${g}:bb=${b}`)
-  }
-
-  if (opts.unsharp && opts.unsharp !== 0) {
-    vFilters.push(`unsharp=3:3:${opts.unsharp.toFixed(2)}:3:3:0`)
-  }
-  if (opts.noise > 0) vFilters.push(`noise=alls=${opts.noise}:allf=t+u`)
-
-  // 保底：最终强制还原到源视频的偶数尺寸，彻底消除中间滤镜的浮点取整误差。
-  // 若有源尺寸，精确 scale 回去；否则只做偶数对齐（fallback）。
-  if (srcDims) {
-    const tw = srcDims.w & ~1
-    const th = srcDims.h & ~1
-    vFilters.push(`scale=${tw}:${th}:flags=lanczos`)
-  } else {
-    vFilters.push(`scale=trunc(iw/2)*2:trunc(ih/2)*2`)
-  }
-  vFilters.push('format=yuv420p')
-  return vFilters
-}
-
-function buildAudioFilters(opts: TransformOptions): string[] {
-  const BASE_SR = 44100
-  const pitchRate = opts.pitchRate ?? 1.03
-  const tempoRatio = opts.speed / pitchRate
-  const aFilters: string[] = [
-    `asetrate=${BASE_SR}*${pitchRate.toFixed(6)}`,
-    `aresample=${BASE_SR}`
-  ]
-  if (tempoRatio >= 0.5 && tempoRatio <= 2.0) {
-    aFilters.push(`atempo=${tempoRatio.toFixed(6)}`)
-  } else if (tempoRatio < 0.5) {
-    aFilters.push(`atempo=0.5,atempo=${(tempoRatio / 0.5).toFixed(6)}`)
-  } else {
-    aFilters.push(`atempo=2.0,atempo=${(tempoRatio / 2.0).toFixed(6)}`)
-  }
-  
-  if (opts.audioEq) {
-    aFilters.push('highpass=f=85', 'lowpass=f=15500')
-  }
-
-  return aFilters
-}
+// 视频/音频扰动滤镜串构造已迁移至 ./obfuscation-filter.ts
 
 export async function spawnFfmpeg(
   ffmpeg: string,
@@ -627,26 +559,27 @@ async function concatIntroMainOutro(
 
 /**
  * 微扰 + 可选片头片尾/中间跳剪 + 贴纸/底部栏；可选片头片尾短片二次拼接。
+ * 现在统一吃 ObfuscationOptions。
  */
 export async function transformVideo(
   ffmpeg: string,
   ffprobe: string,
   inputPath: string,
   outputPath: string,
-  opts: TransformOptions,
+  opts: ObfuscationOptions,
   onProgress?: (msg: string) => void,
   signal?: AbortSignal
 ): Promise<{ ok: boolean; error?: string; aborted?: boolean }> {
   const hasAudio = await ffprobeHasAudio(ffprobe, inputPath)
   const stickers = (opts.stickers ?? []).filter((s) => !!s.imagePath)
-  const bottomR = opts.bottomCoverRatio || 0
+  const bottomR = opts.cover.bottomRatio || 0
 
-  const trimStart = Math.max(0, opts.trimStartSec ?? 0)
-  const trimEnd = Math.max(0, opts.trimEndSec ?? 0)
-  const middleRm = Math.max(0, opts.middleRemoveSec ?? 0)
+  const trimStart = computeEffectiveTrimStart(opts)
+  const trimEnd = Math.max(0, opts.trim.endSec ?? 0)
+  const middleRm = Math.max(0, opts.trim.middleRemoveSec ?? 0)
 
-  const introRaw = opts.introVideoPath?.trim()
-  const outroRaw = opts.outroVideoPath?.trim()
+  const introRaw = opts.concat.introPath?.trim()
+  const outroRaw = opts.concat.outroPath?.trim()
   const introPath = introRaw && existsSync(introRaw) ? introRaw : null
   const outroPath = outroRaw && existsSync(outroRaw) ? outroRaw : null
   const needsConcat = introPath != null || outroPath != null
@@ -667,15 +600,17 @@ export async function transformVideo(
     }
   }
 
-  const needsComplex = needsTemporal || stickers.length > 0 || bottomR > 0 || !!opts.lut3dPath
+  const lutPath = opts.lut.path
+  const needsComplex = needsTemporal || stickers.length > 0 || bottomR > 0 || !!lutPath
   // 提前 probe 源视频尺寸，用于最终 scale 保证输出分辨率与源一致
   const srcDims = await ffprobeVideoDims(ffprobe, inputPath)
   const srcW = srcDims ? (srcDims.w & ~1) : 0
   const srcH = srcDims ? (srcDims.h & ~1) : 0
   console.error(`[DimDebug] srcDims=${JSON.stringify(srcDims)} srcW=${srcW} srcH=${srcH}`)
-  const vFingerprint = buildFingerprintVFilters(opts, srcDims ?? undefined)
-  const aFingerprint = buildAudioFilters(opts)
-  const encodeArgs = ['-c:v', 'libx264', '-preset', 'medium', '-crf', String(opts.crf ?? 23), '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-y']
+  const vFingerprint = buildVideoFingerprintFilters(opts, srcDims ?? undefined)
+  const aFingerprint = hasAudio ? buildAudioFingerprintFilters(opts) : []
+  const metaArgs = buildMetadataArgs(opts)
+  const encodeArgs = ['-c:v', 'libx264', '-preset', 'medium', '-crf', String(opts.encode.crf ?? 23), '-pix_fmt', 'yuv420p', '-movflags', '+faststart', ...metaArgs, '-y']
 
   let mainOut: string
   if (needsConcat) {
@@ -689,6 +624,11 @@ export async function transformVideo(
   let args: string[]
 
   if (!needsComplex) {
+    const audioArgs: string[] = !hasAudio
+      ? ['-an']
+      : aFingerprint.length > 0
+        ? ['-af', aFingerprint.join(','), '-c:a', 'aac', '-b:a', '192k']
+        : ['-c:a', 'aac', '-b:a', '192k']
     args = [
       '-hide_banner',
       '-loglevel',
@@ -697,7 +637,7 @@ export async function transformVideo(
       inputPath,
       '-vf',
       vFingerprint.join(','),
-      ...(hasAudio ? ['-af', aFingerprint.join(','), '-c:a', 'aac', '-b:a', '192k'] : ['-an']),
+      ...audioArgs,
       ...encodeArgs,
       mainOut
     ]
@@ -744,9 +684,9 @@ export async function transformVideo(
 
     let currentBase = '[vfp]'
 
-    if (opts.lut3dPath && existsSync(opts.lut3dPath)) {
-      const escapedPath = opts.lut3dPath.replace(/\\/g, '/').replace(/:/g, '\\:')
-      const intensity = opts.lut3dIntensity ?? 1.0
+    if (lutPath && existsSync(lutPath)) {
+      const escapedPath = lutPath.replace(/\\/g, '/').replace(/:/g, '\\:')
+      const intensity = opts.lut.intensity ?? 1.0
       if (intensity >= 0.99) {
         fcParts.push(`${currentBase}lut3d=${escapedPath}[vlut]`)
         currentBase = '[vlut]'
@@ -760,10 +700,10 @@ export async function transformVideo(
 
     if (bottomR > 0) {
       const r = Math.min(0.5, bottomR).toFixed(3)
-      if (opts.bottomCoverType === 'crop') {
+      if (opts.cover.bottomType === 'crop') {
         fcParts.push(`${currentBase}crop=iw:ih-ih*${r}:0:0[base_cropped]`)
         currentBase = '[base_cropped]'
-      } else if (opts.bottomCoverType === 'black') {
+      } else if (opts.cover.bottomType === 'black') {
         fcParts.push(`${currentBase}drawbox=x=0:y=ih-ih*${r}:w=iw:h=ih*${r}:color=black@1.0:t=fill[base_black]`)
         currentBase = '[base_black]'
       } else {
@@ -820,8 +760,15 @@ export async function transformVideo(
       fcParts.push(`${currentBase}${finalScaleFilter}[out]`)
     }
 
-    if (hasAudio && aFingerprint.length > 0) {
-      fcParts.push(`${aSrc}${aFingerprint.join(',')}[aout]`)
+    let audioMapSrc: string | null = null
+    if (hasAudio) {
+      if (aFingerprint.length > 0) {
+        fcParts.push(`${aSrc}${aFingerprint.join(',')}[aout]`)
+        audioMapSrc = '[aout]'
+      } else {
+        // 没扰动滤镜：trim 后用 [at]；否则直接用 0:a
+        audioMapSrc = needsTemporal ? '[at]' : '0:a'
+      }
     }
 
     args = [
@@ -835,7 +782,7 @@ export async function transformVideo(
       fcParts.join(';'),
       '-map',
       '[out]',
-      ...(hasAudio ? ['-map', '[aout]', '-c:a', 'aac', '-b:a', '192k'] : ['-an']),
+      ...(audioMapSrc ? ['-map', audioMapSrc, '-c:a', 'aac', '-b:a', '192k'] : ['-an']),
       ...encodeArgs,
       mainOut
     ]
@@ -857,7 +804,7 @@ export async function transformVideo(
       mainOut,
       outroPath,
       outputPath,
-      opts.crf ?? 23,
+      opts.encode.crf ?? 23,
       onProgress,
       signal
     )
