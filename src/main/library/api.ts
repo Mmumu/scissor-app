@@ -2,8 +2,8 @@
 
 import { existsSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ImportOptions, ImportProgressEvent, LibraryIndex, LibraryStats } from '../../shared/library'
-import { bootstrap, computeStats, readIndex, removeAudios, removeClips, removeImport } from './index-store'
+import type { ClipGroup, ImportOptions, ImportProgressEvent, LibraryIndex, LibraryStats } from '../../shared/library'
+import { bootstrap, computeStats, createGroup, deleteGroup, readIndex, removeAudios, removeClips, removeImport, renameGroup, updateGroup } from './index-store'
 import { importVideos } from './import'
 import { importStandaloneAudio } from './audio-import'
 import { libraryRoot, resolveRel } from './paths'
@@ -69,6 +69,32 @@ export function deleteImportBy(importId: string): void {
     safeUnlinkRel(a.audioRel)
     safeUnlinkRel(a.waveformRel)
   }
+}
+
+// ── Group API ──────────────────────────────────────────────
+
+export function doCreateGroup(input: {
+  importId: string
+  clipIds: string[]
+  name?: string
+  description?: string
+}): { ok: true; group: ClipGroup } | { ok: false; error: string } {
+  return createGroup(input)
+}
+
+export function doDeleteGroup(groupId: string): { ok: boolean } {
+  return { ok: deleteGroup(groupId) }
+}
+
+export function doRenameGroup(groupId: string, name: string): { ok: boolean } {
+  return { ok: renameGroup(groupId, name) }
+}
+
+export function doUpdateGroup(
+  groupId: string,
+  patch: { name?: string; description?: string }
+): { ok: boolean } {
+  return { ok: updateGroup(groupId, patch) }
 }
 
 export function getAbsPathByRel(rel: string): string {

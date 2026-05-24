@@ -16,8 +16,36 @@ export type MixAudioMode =
 
 export type TargetResolution = 'source' | '720p' | '1080p' | 'vertical-1080' | 'vertical-720'
 
+export type ClipOverride = {
+  /** 从原 clip 起点开始截取的起始秒数；省略 = 0 */
+  startSec?: number
+  /** 截取时长（秒）；省略 = 用 clip 完整长度 */
+  durationSec?: number
+}
+
+export type ReferenceSegment = {
+  start: number
+  end: number
+  dur: number
+}
+
+export type ReferenceState = {
+  /** 用户挑的参考视频绝对路径（脱离索引库管理） */
+  videoPath: string
+  /** 参考视频时长 */
+  durationSec: number
+  /** 文件大小，用于 UI 警告 */
+  sizeBytes: number
+  /** 上次镜头检测使用的阈值 */
+  threshold?: number
+  /** 自动识别出的镜头段；空数组表示尚未分析 */
+  segments: ReferenceSegment[]
+  /** 用户手动打的时间标记（秒） */
+  markers: number[]
+}
+
 export type MixTimeline = {
-  /** 视频段顺序 */
+  /** 视频段顺序；同一个 id 可以出现多次（搭配 clipOverrides 用不同时间窗截取） */
   clipIds: string[]
   audioMode: MixAudioMode
   /** replace 模式下使用的音频顺序 */
@@ -28,11 +56,20 @@ export type MixTimeline = {
   target: TargetResolution
   /** 过原创参数（应用到拼接后的整片） */
   obfuscation: ObfuscationOptions
+  /**
+   * 按时间线索引（不是 clipId）记的子段裁剪表。
+   * 例如 clipIds[3] 对应的 clip 想只用前 1.2s，就 clipOverrides[3] = { durationSec: 1.2 }。
+   */
+  clipOverrides?: Record<number, ClipOverride>
+  /** 参考视频状态（可选） */
+  reference?: ReferenceState
 }
 
 export type MixRenderRequest = {
   timeline: MixTimeline
   outputPath: string
+  /** 跳过 obfuscation 阶段；预览时直接拼接 + 音频（看原始效果） */
+  skipObfuscation?: boolean
 }
 
 export type MixPreviewRequest = {

@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ImportDialog } from './library/ImportDialog'
 import { ClipCard } from './library/ClipCard'
+import { ClipGroupBlock } from './library/ClipGroupBlock'
 import { AudioCard } from './library/AudioCard'
 import { ImportProgress, type ProgressItem } from './library/ImportProgress'
 import { MixWorkspace } from './mix/MixWorkspace'
+import { SourceGroupingModal } from './library/SourceGroupingModal'
 import type {
+  ClipGroup,
   ImportOptions,
   ImportProgressEvent,
   LibraryIndex,
   LibraryStats
 } from '../../../shared/library'
+import { buildRenderUnits, evaluateGrouping } from '../utils/clipGroups'
 
 const IMPORT_COLORS = [
   '#f97316',
@@ -50,7 +54,12 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
     existingImportId: string
   } | null>(null)
   const [mixOpen, setMixOpen] = useState(false)
+  const [sourceGroupingImportId, setSourceGroupingImportId] = useState<string | null>(null)
+  const [pendingGroupDesc, setPendingGroupDesc] = useState('')
   const lastImportOptsRef = useRef<Omit<ImportOptions, 'paths'> | null>(null)
+  // shift+click 的锚点：记录最近一次普通点击在 visibleClips/visibleAudios 列表里的下标
+  const clipAnchorRef = useRef<number | null>(null)
+  const audioAnchorRef = useRef<number | null>(null)
 
   const reload = useCallback(async () => {
     const [i, s] = await Promise.all([
@@ -60,6 +69,38 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
     setIndex(i)
     setStats(s)
   }, [])
+
+  // 切换分类时锚点失效，先重置
+  useEffect(() => {
+    clipAnchorRef.current = null
+    audioAnchorRef.current = null
+  }, [category])
+
+  // Cmd/Ctrl+A 全选当前可见、Esc 清空当前选择（混剪台开启时不抢键盘）
+  useEffect(() => {
+    if (mixOpen) return
+    function onKey(e: KeyboardEvent): void {
+      const tag = (e.target as HTMLElement | null)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if ((e.metaKey || e.ctrlKey) && e.code === 'KeyA') {
+        if (category === 'audios') {
+          e.preventDefault()
+          selectAllVisibleAudios()
+        } else {
+          e.preventDefault()
+          selectAllVisibleClips()
+        }
+      } else if (e.code === 'Escape') {
+        if (selectedClips.size > 0 || selectedAudios.size > 0) {
+          setSelectedClips(new Set())
+          setSelectedAudios(new Set())
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, mixOpen, selectedClips.size, selectedAudios.size])
 
   useEffect(() => {
     reload()
@@ -175,6 +216,197 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
         : index.clips
   const visibleAudios = category === 'videos' || category.startsWith('src:') ? [] : index.audios
 
+  function handleClipClick(idx: number, e: React.MouseEvent): void {
+    const clip = visibleClips[idx]
+    if (!clip) return
+    if (e.shiftKey && clipAnchorRef.current != null) {
+      const anchor = clipAnchorRef.current
+      // 锚点超出当前可见范围（切换分类后旧索引无效），降级为普通点击
+      if (anchor < 0 || anchor >= visibleClips.length) {
+        clipAnchorRef.current = idx
+        toggleClip(clip.id)
+        return
+      }
+      const start = Math.min(anchor, idx)
+      const end = Math.max(anchor, idx)
+      const targetSelected = selectedClips.has(clip.id)
+      // 若目标已选 → 整段反选；若目标未选 → 整段选上
+      setSelectedClips((prev) => {
+        const next = new Set(prev)
+        for (let i = start; i <= end; i++) {
+          const id = visibleClips[i].id
+          if (targetSelected) next.delete(id)
+          else next.add(id)
+        }
+        return next
+      })
+      return
+    }
+    clipAnchorRef.current = idx
+    toggleClip(clip.id)
+  }
+
+  function toggleClip(id: string): void {
+    setSelectedClips((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function handleAudioClick(idx: number, e: React.MouseEvent): void {
+    const a = visibleAudios[idx]
+    if (!a) return
+    if (e.shiftKey && audioAnchorRef.current != null) {
+      const anchor = audioAnchorRef.current
+      if (anchor < 0 || anchor >= visibleAudios.length) {
+        audioAnchorRef.current = idx
+        toggleAudio(a.id)
+        return
+      }
+      const start = Math.min(anchor, idx)
+      const end = Math.max(anchor, idx)
+      const targetSelected = selectedAudios.has(a.id)
+      setSelectedAudios((prev) => {
+        const next = new Set(prev)
+        for (let i = start; i <= end; i++) {
+          const id = visibleAudios[i].id
+          if (targetSelected) next.delete(id)
+          else next.add(id)
+        }
+        return next
+      })
+      return
+    }
+    audioAnchorRef.current = idx
+    toggleAudio(a.id)
+  }
+
+  function toggleAudio(id: string): void {
+    setSelectedAudios((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function selectAllVisibleClips(): void {
+    setSelectedClips((prev) => {
+      const next = new Set(prev)
+      visibleClips.forEach((c) => next.add(c.id))
+      return next
+    })
+  }
+  function clearVisibleClipSelection(): void {
+    setSelectedClips((prev) => {
+      if (visibleClips.length === 0) return prev
+      const visIds = new Set(visibleClips.map((c) => c.id))
+      const next = new Set<string>()
+      prev.forEach((id) => {
+        if (!visIds.has(id)) next.add(id)
+      })
+      return next
+    })
+  }
+  function invertVisibleClipSelection(): void {
+    setSelectedClips((prev) => {
+      const next = new Set(prev)
+      visibleClips.forEach((c) => {
+        if (next.has(c.id)) next.delete(c.id)
+        else next.add(c.id)
+      })
+      return next
+    })
+  }
+  function selectAllVisibleAudios(): void {
+    setSelectedAudios((prev) => {
+      const next = new Set(prev)
+      visibleAudios.forEach((a) => next.add(a.id))
+      return next
+    })
+  }
+  function clearVisibleAudioSelection(): void {
+    setSelectedAudios((prev) => {
+      if (visibleAudios.length === 0) return prev
+      const visIds = new Set(visibleAudios.map((a) => a.id))
+      const next = new Set<string>()
+      prev.forEach((id) => {
+        if (!visIds.has(id)) next.add(id)
+      })
+      return next
+    })
+  }
+
+  const visibleClipsAllSelected =
+    visibleClips.length > 0 && visibleClips.every((c) => selectedClips.has(c.id))
+  const visibleClipsSelectedCount = visibleClips.filter((c) => selectedClips.has(c.id)).length
+  const visibleAudiosAllSelected =
+    visibleAudios.length > 0 && visibleAudios.every((a) => selectedAudios.has(a.id))
+
+  const groupingEval = evaluateGrouping(index, selectedClips)
+  const renderUnits = buildRenderUnits(visibleClips, index.clipGroups)
+
+  async function handleCreateGroup(): Promise<void> {
+    if (!groupingEval.canGroup || !groupingEval.importId || !groupingEval.orderedIds) {
+      alert('当前选择不满足成组条件：' + (groupingEval.reason ?? '未知原因'))
+      return
+    }
+    const api = window.scissor?.library?.createGroup
+    if (typeof api !== 'function') {
+      alert(
+        '成组接口未加载（可能是 dev 模式下 preload 未刷新）。\n请在终端 Ctrl+C 停掉 pnpm run dev，再重新启动一次。'
+      )
+      return
+    }
+    try {
+      const r = await api({
+        importId: groupingEval.importId,
+        clipIds: groupingEval.orderedIds,
+        description: pendingGroupDesc.trim() || undefined
+      })
+      if (!r.ok) {
+        alert('成组失败：' + (r as { error?: string }).error)
+        return
+      }
+      setSelectedClips(new Set())
+      setPendingGroupDesc('')
+      reload()
+    } catch (e) {
+      console.error('[createGroup] failed:', e)
+      alert('成组失败：' + (e instanceof Error ? e.message : String(e)))
+    }
+  }
+
+  async function handleDissolveGroup(g: ClipGroup): Promise<void> {
+    await window.scissor.library.deleteGroup(g.id)
+    reload()
+  }
+
+  async function handleRenameGroup(g: ClipGroup, name: string): Promise<void> {
+    await window.scissor.library.renameGroup(g.id, name)
+    reload()
+  }
+
+  async function handleUpdateGroupDesc(g: ClipGroup, description: string): Promise<void> {
+    await window.scissor.library.updateGroup(g.id, { description })
+    reload()
+  }
+
+  function handleToggleGroupSelect(g: ClipGroup): void {
+    setSelectedClips((prev) => {
+      const next = new Set(prev)
+      const allIn = g.clipIds.every((id) => next.has(id))
+      if (allIn) {
+        g.clipIds.forEach((id) => next.delete(id))
+      } else {
+        g.clipIds.forEach((id) => next.add(id))
+      }
+      return next
+    })
+  }
+
   return (
     <div className="randomcut-root">
       <div className="randomcut-head">
@@ -247,6 +479,17 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
                     />
                     <button
                       type="button"
+                      className="randomcut-aside-icon-btn"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setSourceGroupingImportId(rec.id)
+                      }}
+                      title="对照原视频成组"
+                    >
+                      🎬
+                    </button>
+                    <button
+                      type="button"
                       className="randomcut-aside-x"
                       onClick={(e) => {
                         e.stopPropagation()
@@ -272,25 +515,86 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
                 <h3>
                   视频片段 <span className="muted">({visibleClips.length})</span>
                 </h3>
-                {selectedClips.size > 0 && (
-                  <div className="randomcut-bulk">
-                    已选 {selectedClips.size}
-                    <button
-                      type="button"
-                      className="ghost-btn small"
-                      onClick={() => setSelectedClips(new Set())}
-                    >
-                      清空
-                    </button>
-                    <button
-                      type="button"
-                      className="danger-btn small"
-                      onClick={handleDeleteSelectedClips}
-                    >
-                      删除
-                    </button>
-                  </div>
-                )}
+                <span className="randomcut-tip">
+                  提示：按住 <kbd>Shift</kbd> 点击两个卡片可批量选中 / 取消（也支持 <kbd>⌘A</kbd> 全选、<kbd>Esc</kbd> 清空）
+                </span>
+                <div className="randomcut-bulk">
+                  {visibleClips.length > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        className="ghost-btn small"
+                        onClick={
+                          visibleClipsAllSelected
+                            ? clearVisibleClipSelection
+                            : selectAllVisibleClips
+                        }
+                      >
+                        {visibleClipsAllSelected ? '取消全选' : '全选'}
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-btn small"
+                        onClick={invertVisibleClipSelection}
+                      >
+                        反选
+                      </button>
+                    </>
+                  )}
+                  {selectedClips.size > 0 && (
+                    <>
+                      <span className="randomcut-bulk-stat">
+                        已选 <strong>{selectedClips.size}</strong>
+                        {visibleClipsSelectedCount !== selectedClips.size && (
+                          <span className="muted"> （此视图 {visibleClipsSelectedCount}）</span>
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        className="ghost-btn small"
+                        onClick={handleCreateGroup}
+                        disabled={!groupingEval.canGroup}
+                        title={groupingEval.canGroup ? '把所选连续片段成一组' : groupingEval.reason}
+                      >
+                        + 成组
+                      </button>
+                      {!groupingEval.canGroup && selectedClips.size >= 1 && (
+                        <span className="randomcut-group-hint" title={groupingEval.reason}>
+                          ⚠ {groupingEval.reason}
+                        </span>
+                      )}
+                      {groupingEval.canGroup && (
+                        <span className="randomcut-group-hint ok">
+                          ✓ 可成 1 组{selectedClips.size === 1 ? '（单段）' : ''}
+                        </span>
+                      )}
+                      {groupingEval.canGroup && (
+                        <input
+                          type="text"
+                          className="randomcut-group-desc-input"
+                          placeholder="组描述（可选）"
+                          value={pendingGroupDesc}
+                          onChange={(e) => setPendingGroupDesc(e.target.value)}
+                          maxLength={200}
+                        />
+                      )}
+                      <button
+                        type="button"
+                        className="ghost-btn small"
+                        onClick={() => setSelectedClips(new Set())}
+                      >
+                        清空
+                      </button>
+                      <button
+                        type="button"
+                        className="danger-btn small"
+                        onClick={handleDeleteSelectedClips}
+                      >
+                        删除
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
               {visibleClips.length === 0 ? (
                 <div className="randomcut-empty">
@@ -298,20 +602,51 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
                 </div>
               ) : (
                 <div className="clip-grid">
-                  {visibleClips.map((c) => (
-                    <ClipCard
-                      key={c.id}
-                      clip={c}
-                      importColor={importColors.get(c.importId) ?? '#666'}
-                      selected={selectedClips.has(c.id)}
-                      onSelect={(s) => {
-                        const next = new Set(selectedClips)
-                        if (s) next.add(c.id)
-                        else next.delete(c.id)
-                        setSelectedClips(next)
-                      }}
-                    />
-                  ))}
+                  {(() => {
+                    // visibleClips 在 renderUnits 里已经按顺序铺平；下标用 visibleClips 算（保持 shift+click 锚点）
+                    const idxOfId = new Map(visibleClips.map((c, i) => [c.id, i] as const))
+                    return renderUnits.map((u) => {
+                      if (u.kind === 'clip') {
+                        const i = idxOfId.get(u.clip.id) ?? 0
+                        return (
+                          <ClipCard
+                            key={u.clip.id}
+                            clip={u.clip}
+                            importColor={importColors.get(u.clip.importId) ?? '#666'}
+                            selected={selectedClips.has(u.clip.id)}
+                            onSelect={(e) => handleClipClick(i, e)}
+                          />
+                        )
+                      }
+                      const color = importColors.get(u.group.importId) ?? '#666'
+                      return (
+                        <ClipGroupBlock
+                          key={u.group.id}
+                          group={u.group}
+                          clips={u.clips}
+                          color={color}
+                          selectedSet={selectedClips}
+                          onToggleGroupSelect={handleToggleGroupSelect}
+                          onDissolve={handleDissolveGroup}
+                          onRename={handleRenameGroup}
+                          onUpdateDescription={handleUpdateGroupDesc}
+                        >
+                          {u.clips.map((c) => {
+                            const i = idxOfId.get(c.id) ?? 0
+                            return (
+                              <ClipCard
+                                key={c.id}
+                                clip={c}
+                                importColor={color}
+                                selected={selectedClips.has(c.id)}
+                                onSelect={(e) => handleClipClick(i, e)}
+                              />
+                            )
+                          })}
+                        </ClipGroupBlock>
+                      )
+                    })
+                  })()}
                 </div>
               )}
             </div>
@@ -324,30 +659,47 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
                 <h3>
                   音频 <span className="muted">({visibleAudios.length})</span>
                 </h3>
-                {selectedAudios.size > 0 && (
-                  <div className="randomcut-bulk">
-                    已选 {selectedAudios.size}
+                <div className="randomcut-bulk">
+                  {visibleAudios.length > 0 && (
                     <button
                       type="button"
                       className="ghost-btn small"
-                      onClick={() => setSelectedAudios(new Set())}
+                      onClick={
+                        visibleAudiosAllSelected
+                          ? clearVisibleAudioSelection
+                          : selectAllVisibleAudios
+                      }
                     >
-                      清空
+                      {visibleAudiosAllSelected ? '取消全选' : '全选'}
                     </button>
-                    <button
-                      type="button"
-                      className="danger-btn small"
-                      onClick={async () => {
-                        if (!confirm(`删除 ${selectedAudios.size} 个音频？`)) return
-                        await window.scissor.library.deleteAudios(Array.from(selectedAudios))
-                        setSelectedAudios(new Set())
-                        reload()
-                      }}
-                    >
-                      删除
-                    </button>
-                  </div>
-                )}
+                  )}
+                  {selectedAudios.size > 0 && (
+                    <>
+                      <span className="randomcut-bulk-stat">
+                        已选 <strong>{selectedAudios.size}</strong>
+                      </span>
+                      <button
+                        type="button"
+                        className="ghost-btn small"
+                        onClick={() => setSelectedAudios(new Set())}
+                      >
+                        清空
+                      </button>
+                      <button
+                        type="button"
+                        className="danger-btn small"
+                        onClick={async () => {
+                          if (!confirm(`删除 ${selectedAudios.size} 个音频？`)) return
+                          await window.scissor.library.deleteAudios(Array.from(selectedAudios))
+                          setSelectedAudios(new Set())
+                          reload()
+                        }}
+                      >
+                        删除
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
               {visibleAudios.length === 0 ? (
                 <div className="randomcut-empty">
@@ -357,17 +709,12 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
                 </div>
               ) : (
                 <div className="audio-grid">
-                  {visibleAudios.map((a) => (
+                  {visibleAudios.map((a, idx) => (
                     <AudioCard
                       key={a.id}
                       audio={a}
                       selected={selectedAudios.has(a.id)}
-                      onSelect={(s) => {
-                        const next = new Set(selectedAudios)
-                        if (s) next.add(a.id)
-                        else next.delete(a.id)
-                        setSelectedAudios(next)
-                      }}
+                      onSelect={(e) => handleAudioClick(idx, e)}
                     />
                   ))}
                 </div>
@@ -471,6 +818,25 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
           onRefreshLibrary={reload}
         />
       )}
+
+      {sourceGroupingImportId &&
+        (() => {
+          const rec = index.imports.find((r) => r.id === sourceGroupingImportId)
+          if (!rec) {
+            // 来源被删了：直接关
+            setSourceGroupingImportId(null)
+            return null
+          }
+          return (
+            <SourceGroupingModal
+              index={index}
+              importRec={rec}
+              importColor={importColors.get(rec.id) ?? '#666'}
+              onClose={() => setSourceGroupingImportId(null)}
+              onCreated={reload}
+            />
+          )
+        })()}
     </div>
   )
 }

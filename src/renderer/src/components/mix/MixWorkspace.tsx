@@ -3,12 +3,14 @@ import type { AudioMeta, ClipMeta, LibraryIndex } from '../../../../shared/libra
 import {
   resolveTargetDims,
   TARGET_LABEL,
+  type ClipOverride,
   type MixRenderProgressEvent,
   type MixTimeline,
   type TargetResolution
 } from '../../../../shared/mix'
 import { DEFAULT_OBFUSCATION, type ObfuscationOptions } from '../../../../shared/obfuscation'
 import { TimelineStrip } from './TimelineStrip'
+import { TimelinePlayback, type PlaybackSegment } from './TimelinePlayback'
 import { ObfuscationOptions as ObfuscationOptionsPanel } from '../ObfuscationOptions'
 
 type Props = {
@@ -54,14 +56,13 @@ export function MixWorkspace({
   const [audioLoop, setAudioLoop] = useState(true)
   const [target, setTarget] = useState<TargetResolution>('source')
   const [obf, setObf] = useState<ObfuscationOptions>(defaultMixObf())
-  const [previewBusy, setPreviewBusy] = useState(false)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [previewErr, setPreviewErr] = useState('')
   const [renderBusy, setRenderBusy] = useState(false)
   const [renderProgress, setRenderProgress] = useState<MixRenderProgressEvent | null>(null)
   const [renderDone, setRenderDone] = useState<{ outputPath: string } | null>(null)
   const [asideTab, setAsideTab] = useState<'clips' | 'audio'>('clips')
-  const previewUrlRef = useRef<string | null>(null)
+  const [timelineSel, setTimelineSel] = useState<Set<number>>(new Set())
+  const [clipOverrides, setClipOverrides] = useState<Record<number, ClipOverride>>({})
+  const [stickerBgUrl, setStickerBgUrl] = useState<string | null>(null)
 
   const clipMap = useMemo(() => new Map(index.clips.map((c) => [c.id, c])), [index.clips])
   const audioMap = useMemo(() => new Map(index.audios.map((a) => [a.id, a])), [index.audios])
@@ -85,6 +86,31 @@ export function MixWorkspace({
     orderedClips[0] ? { w: orderedClips[0].width, h: orderedClips[0].height } : { w: 1280, h: 720 }
   const targetDims = resolveTargetDims(target, firstDims)
 
+  /** 从 clips + overrides 生成 PlaybackSegment[] */
+  const playbackSegments: PlaybackSegment[] = useMemo(() =>
+    orderedClips.map((clip, i) => {
+      const ov = clipOverrides[i]
+      return {
+        clip,
+        startSec: ov?.startSec ?? 0,
+        durationSec: ov?.durationSec ?? clip.durationSec
+      }
+    }),
+    [orderedClips, clipOverrides]
+  )
+
+  // 加载首张缩略图作为贴图预览背景
+  useEffect(() => {
+    const first = orderedClips[0]
+    if (!first) { setStickerBgUrl(null); return }
+    let cancelled = false
+    window.scissor.library.readAsBase64(first.thumbRel).then((r) => {
+      if (cancelled) return
+      if (r.ok && r.base64) setStickerBgUrl(`data:${r.mime};base64,${r.base64}`)
+    })
+    return () => { cancelled = true }
+  }, [orderedClips[0]?.thumbRel])
+
   // mix progress
   useEffect(() => {
     const off = window.scissor.mix.onProgress((ev) => {
@@ -100,15 +126,12 @@ export function MixWorkspace({
     return off
   }, [onRefreshLibrary])
 
-  useEffect(() => {
-    return () => {
-      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
-    }
-  }, [])
+
 
   function buildTimeline(): MixTimeline {
     return {
       clipIds,
+      clipOverrides: Object.keys(clipOverrides).length > 0 ? clipOverrides : undefined,
       audioMode,
       audioIds,
       audioLoop,
@@ -134,35 +157,6 @@ export function MixWorkspace({
     setClipIds((prev) => [...prev, ...ids.filter((x) => !prev.includes(x))])
   }
 
-  async function handlePreview(): Promise<void> {
-    if (clipIds.length === 0) {
-      setPreviewErr('时间线为空')
-      return
-    }
-    setPreviewBusy(true)
-    setPreviewErr('')
-    try {
-      const r = await window.scissor.mix.preview({
-        timeline: buildTimeline(),
-        maxSec: 3,
-        withObfuscation: true
-      })
-      if (!r.ok || !r.base64) {
-        setPreviewErr(r.error ?? '预览失败')
-        return
-      }
-      const bin = atob(r.base64)
-      const arr = new Uint8Array(bin.length)
-      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
-      const blob = new Blob([arr], { type: r.mime ?? 'video/mp4' })
-      const url = URL.createObjectURL(blob)
-      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
-      previewUrlRef.current = url
-      setPreviewUrl(url)
-    } finally {
-      setPreviewBusy(false)
-    }
-  }
 
   async function handleRender(): Promise<void> {
     if (clipIds.length === 0) return
@@ -198,7 +192,7 @@ export function MixWorkspace({
       </div>
 
       <div className="mix-workspace-body">
-        {/* 左：素材 / 音频 Tab 切换 */}
+        {/* 左：视频片段 / 音频 Tab 切换 */}
         <aside className="mix-aside">
           <div className="mix-aside-tabs">
             <button
@@ -206,7 +200,7 @@ export function MixWorkspace({
               className={`mix-aside-tab ${asideTab === 'clips' ? 'active' : ''}`}
               onClick={() => setAsideTab('clips')}
             >
-              素材池
+              视频片段
               <span className="mix-aside-tab-meta">
                 {clipIds.length}/{index.clips.length}
               </span>
@@ -216,7 +210,7 @@ export function MixWorkspace({
               className={`mix-aside-tab ${asideTab === 'audio' ? 'active' : ''}`}
               onClick={() => setAsideTab('audio')}
             >
-              音频池
+              音频
               <span className="mix-aside-tab-meta">
                 {audioIds.length}/{index.audios.length}
               </span>
@@ -284,6 +278,8 @@ export function MixWorkspace({
           )}
         </aside>
 
+        <div className="mix-resizer" />
+
         {/* 中：时间线 + 预览 */}
         <main className="mix-main">
           <div className="mix-main-toolbar">
@@ -331,8 +327,20 @@ export function MixWorkspace({
           <TimelineStrip
             clips={orderedClips}
             importColors={importColors}
-            onReorder={setClipIds}
-            onRemove={handleRemoveClip}
+            overrides={clipOverrides}
+            clipGroups={index.clipGroups}
+            selectedIndices={timelineSel}
+            onSelectionChange={setTimelineSel}
+            onReorder={(ids, nextSel) => {
+              setClipIds(ids)
+              setClipOverrides({}) // 重排后 override 下标失效，清空
+              if (nextSel) setTimelineSel(nextSel)
+            }}
+            onBulkRemove={(indices) => {
+              setClipIds((prev) => prev.filter((_, i) => !indices.has(i)))
+              setClipOverrides({})
+              setTimelineSel(new Set())
+            }}
           />
 
           {/* 音频策略 */}
@@ -379,33 +387,59 @@ export function MixWorkspace({
                 音频比视频短时循环
               </label>
             )}
+            {audioMode === 'replace' && (() => {
+              const audioDur = orderedAudios.reduce((a, x) => a + x.durationSec, 0)
+              const diff = audioDur - totalDur
+              const maxDur = Math.max(totalDur, audioDur, 0.01)
+              const videoPct = (totalDur / maxDur) * 100
+              const audioPct = (audioDur / maxDur) * 100
+              return (
+                <div className="mix-audio-compare">
+                  <div className="mix-audio-compare-row">
+                    <span className="mix-audio-compare-label">🎬 视频</span>
+                    <div className="mix-audio-compare-bar">
+                      <div
+                        className="mix-audio-compare-fill video"
+                        style={{ width: `${videoPct}%` }}
+                      />
+                    </div>
+                    <span className="mix-audio-compare-val">{totalDur.toFixed(1)}s</span>
+                  </div>
+                  <div className="mix-audio-compare-row">
+                    <span className="mix-audio-compare-label">♪ 音频</span>
+                    <div className="mix-audio-compare-bar">
+                      <div
+                        className="mix-audio-compare-fill audio"
+                        style={{ width: `${audioPct}%` }}
+                      />
+                    </div>
+                    <span className="mix-audio-compare-val">{audioDur.toFixed(1)}s</span>
+                  </div>
+                  <div className="mix-audio-compare-diff">
+                    {audioDur === 0
+                      ? '← 切到「音频」标签选择音频'
+                      : Math.abs(diff) < 0.1
+                        ? '✓ 时长刚好匹配'
+                        : diff > 0
+                          ? `音频多 ${diff.toFixed(1)}s（${audioLoop ? '将截断' : '尾部会被截断'}）`
+                          : `音频短 ${(-diff).toFixed(1)}s（${audioLoop ? '将循环补齐' : '尾部将无声'}）`}
+                  </div>
+                </div>
+              )
+            })()}
           </div>
 
-          {/* 预览 */}
-          <div className="mix-preview">
-            <div className="mix-preview-head">
-              <strong>预览（前 3 秒）</strong>
-              <button
-                type="button"
-                className="primary-btn small"
-                onClick={handlePreview}
-                disabled={previewBusy || clipIds.length === 0}
-              >
-                {previewBusy ? '生成中…' : '生成预览'}
-              </button>
-            </div>
-            <div className="mix-preview-body">
-              {previewUrl ? (
-                <video src={previewUrl} controls autoPlay muted loop playsInline />
-              ) : (
-                <div className="mix-preview-placeholder">
-                  {previewBusy ? '正在拼接 + 应用过原创参数…' : '点上方按钮生成预览'}
-                </div>
-              )}
-            </div>
-            {previewErr && <div className="mix-preview-err">{previewErr}</div>}
-          </div>
+          {/* 试听（内联播放片段+音频，无需重新编码） */}
+          <TimelinePlayback
+            segments={playbackSegments}
+            audioMode={audioMode}
+            audios={orderedAudios}
+            audioLoop={audioLoop}
+            importColors={importColors}
+          />
         </main>
+
+        <div className="mix-resizer" />
 
         {/* 右：过原创参数 */}
         <aside className="mix-options">
@@ -416,6 +450,7 @@ export function MixWorkspace({
             luts={luts}
             hide={{ concat: true, trim: true }}
             showPresetBar
+            stickerPreviewContext={{ targetDims, bgUrl: stickerBgUrl }}
           />
         </aside>
       </div>

@@ -6,7 +6,8 @@ type Props = {
   /** 用于在卡片左上角显示来源颜色块（按 importId 映射） */
   importColor: string
   selected?: boolean
-  onSelect?: (selected: boolean) => void
+  /** 把原始鼠标事件透出，方便父组件做 shift / cmd 范围选择 */
+  onSelect?: (e: React.MouseEvent) => void
   onDelete?: () => void
 }
 
@@ -56,7 +57,7 @@ export function ClipCard({ clip, importColor, selected, onSelect, onDelete }: Pr
       className={`clip-card ${selected ? 'selected' : ''}`}
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
-      onClick={() => onSelect?.(!selected)}
+      onClick={(e) => onSelect?.(e)}
     >
       <div className="clip-card-thumb">
         {hovering && videoUrl ? (

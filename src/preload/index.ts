@@ -8,6 +8,7 @@ import type {
 import type { ObfuscationOptions } from '../shared/obfuscation'
 import type {
   AudioMeta,
+  ClipGroup,
   ImportOptions,
   ImportProgressEvent,
   LibraryIndex,
@@ -20,8 +21,26 @@ import type {
   MixRenderProgressEvent,
   MixRenderRequest,
   MixRenderResult,
-  MixTimeline
+  MixTimeline,
+  ReferenceSegment
 } from '../shared/mix'
+
+export type AnalyzeReferenceRequest = {
+  path: string
+  threshold?: number
+  minSegSec?: number
+  maxSegSec?: number
+}
+
+export type AnalyzeReferenceResult =
+  | {
+      ok: true
+      durationSec: number
+      sizeBytes: number
+      segments: ReferenceSegment[]
+      threshold: number
+    }
+  | { ok: false; error: string }
 
 export type {
   CompareVideosOptions,
@@ -40,7 +59,8 @@ export type {
   MixRenderProgressEvent,
   MixRenderRequest,
   MixRenderResult,
-  MixTimeline
+  MixTimeline,
+  ReferenceSegment
 }
 
 export type InsertSide = 'top' | 'bottom' | 'left' | 'right'
@@ -96,6 +116,10 @@ contextBridge.exposeInMainWorld('scissor', {
     ipcRenderer.invoke('ffprobeDuration', path),
   getVideoDims: (path: string): Promise<{ ok: boolean; w?: number; h?: number; error?: string }> =>
     ipcRenderer.invoke('getVideoDims', path),
+  extractFirstFrame: (
+    path: string
+  ): Promise<{ ok: boolean; dataUrl?: string; error?: string }> =>
+    ipcRenderer.invoke('extractFirstFrame', path),
   exportTimeline: (
     clips: TimelineClip[],
     outPath: string
@@ -145,6 +169,28 @@ contextBridge.exposeInMainWorld('scissor', {
     ): Promise<{ ok: boolean; base64?: string; mime?: string; error?: string }> =>
       ipcRenderer.invoke('library:readAsBase64', rel),
     rootDir: (): Promise<string> => ipcRenderer.invoke('library:rootDir'),
+    getSourceVideoUrl: (
+      importId: string
+    ): Promise<
+      | { ok: true; url: string; sourcePath: string; exists: boolean }
+      | { ok: false; error: string }
+    > => ipcRenderer.invoke('library:getSourceVideoUrl', importId),
+    createGroup: (input: {
+      importId: string
+      clipIds: string[]
+      name?: string
+      description?: string
+    }): Promise<{ ok: true; group: ClipGroup } | { ok: false; error: string }> =>
+      ipcRenderer.invoke('library:createGroup', input),
+    deleteGroup: (groupId: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('library:deleteGroup', groupId),
+    renameGroup: (groupId: string, name: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('library:renameGroup', { groupId, name }),
+    updateGroup: (
+      groupId: string,
+      patch: { name?: string; description?: string }
+    ): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('library:updateGroup', { groupId, patch }),
     onImportProgress: (cb: (ev: ImportProgressEvent) => void) => {
       const listener = (_e: unknown, ev: unknown) => cb(ev as ImportProgressEvent)
       ipcRenderer.on('library:import-progress', listener)
@@ -174,6 +220,20 @@ contextBridge.exposeInMainWorld('scissor', {
       return () => {
         ipcRenderer.removeListener('mix:progress', listener)
       }
-    }
+    },
+    pickReferenceVideo: (): Promise<string | undefined> =>
+      ipcRenderer.invoke('mix:pickReferenceVideo'),
+    analyzeReference: (req: AnalyzeReferenceRequest): Promise<AnalyzeReferenceResult> =>
+      ipcRenderer.invoke('mix:analyzeReference', req),
+    readReferenceBytes: (
+      path: string
+    ): Promise<
+      | { ok: true; base64: string; mime: string; sizeBytes: number }
+      | { ok: false; error: string; sizeBytes?: number }
+    > => ipcRenderer.invoke('mix:readReferenceBytes', path),
+    probeReferenceMeta: (
+      path: string
+    ): Promise<{ ok: boolean; durationSec?: number; sizeBytes?: number; error?: string }> =>
+      ipcRenderer.invoke('mix:probeReferenceMeta', path)
   }
 })

@@ -7,6 +7,7 @@ import {
 import type { StickerItem } from '../../../shared/types'
 import { ObfuscationGroup } from './ObfuscationGroup'
 import { ObfuscationPresetBar } from './ObfuscationPresetBar'
+import { StickerPreview } from './mix/StickerPreview'
 
 type Props = {
   value: Opts
@@ -24,6 +25,12 @@ type Props = {
   showPresetBar?: boolean
   /** Slot 注入：preset bar 之后、几何之前的额外控件（如 stitch 的条带配置） */
   slotAfterPreset?: React.ReactNode
+  /** 提供该上下文时，「贴图水印」分组里会渲染可拖拽的位置预览画布 */
+  stickerPreviewContext?: {
+    targetDims: { w: number; h: number }
+    /** 已解析好的背景图 dataURL（首帧），可空 */
+    bgUrl?: string | null
+  }
 }
 
 function basename(p: string): string {
@@ -49,7 +56,8 @@ export function ObfuscationOptions({
   luts = [],
   hide = {},
   showPresetBar = true,
-  slotAfterPreset
+  slotAfterPreset,
+  stickerPreviewContext
 }: Props) {
   /** 局部 set helper：仅替换某个分组 */
   const set = useCallback(
@@ -133,7 +141,8 @@ export function ObfuscationOptions({
       widthFrac: 0.15,
       opacity: 1,
       startSec: null,
-      endSec: null
+      endSec: null,
+      motion: 'static'
     }
     onChange({ ...v, stickers: [...v.stickers, next] })
   }
@@ -492,6 +501,19 @@ export function ObfuscationOptions({
       {/* ── 贴纸 ──────────────────────────────── */}
       {!hide.stickers && (
         <ObfuscationGroup title="贴图水印" summary={stickerSummary} disabled={disabled}>
+          {stickerPreviewContext && v.stickers.length > 0 && (
+            <StickerPreview
+              stickers={v.stickers}
+              targetDims={stickerPreviewContext.targetDims}
+              bgUrl={stickerPreviewContext.bgUrl}
+              onChange={(id, patch) =>
+                onChange({
+                  ...v,
+                  stickers: v.stickers.map((x) => (x.id === id ? { ...x, ...patch } : x))
+                })
+              }
+            />
+          )}
           <div style={{ marginBottom: 8 }}>
             <button type="button" className="ghost-btn" onClick={addSticker} disabled={disabled}>
               + 添加图片
@@ -507,13 +529,33 @@ export function ObfuscationOptions({
                   ×
                 </button>
               </div>
+              {s.motion === 'march-lr' && (
+                <div className="obf-sticker-hint">
+                  紧贴画面底部，从最左走到最右，匀速走过整个生效时段（startSec~endSec，未填即整段）。
+                  上/下/左/右四个间距在该模式下都被忽略。
+                </div>
+              )}
               <div className="obf-sticker-grid">
+                <label className="s-label">
+                  运动
+                  <select
+                    value={s.motion ?? 'static'}
+                    onChange={(e) =>
+                      updateSticker(s.id, { motion: e.target.value as NonNullable<StickerItem['motion']> })
+                    }
+                    disabled={disabled}
+                  >
+                    <option value="static">静止</option>
+                    <option value="march-lr">底部·从左到右</option>
+                  </select>
+                </label>
                 <label className="s-label">
                   位置
                   <select
                     value={s.anchor}
                     onChange={(e) => updateSticker(s.id, { anchor: e.target.value as StickerItem['anchor'] })}
-                    disabled={disabled}
+                    disabled={disabled || s.motion === 'march-lr'}
+                    title={s.motion === 'march-lr' ? '运动模式下位置由「左右间距」决定' : undefined}
                   >
                     <option value="top-left">左上</option>
                     <option value="top-right">右上</option>

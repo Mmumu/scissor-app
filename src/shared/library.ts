@@ -94,12 +94,24 @@ export type AudioMeta = {
   waveformRel: string
   createdAt: number
 }
+/**
+ * 用户在素材池里把同 import 内的若干连续 clip 划成一组（可为单段）。
+ */
+export type ClipGroup = {
+  id: string
+  importId: string
+  name: string
+  description?: string
+  clipIds: string[]
+  createdAt: number
+}
 
 export type LibraryIndex = {
   version: 1
   imports: ImportRecord[]
   clips: ClipMeta[]
   audios: AudioMeta[]
+  clipGroups?: ClipGroup[]
 }
 
 export const DEFAULT_IMPORT_OPTIONS: Omit<ImportOptions, 'paths'> = {

@@ -12,7 +12,6 @@ function basename(p: string): string {
 }
 
 export function ImportDialog({ files, onCancel, onConfirm }: Props) {
-  const [audioMode, setAudioMode] = useState<ImportOptions['audioMode']>(DEFAULT_IMPORT_OPTIONS.audioMode)
   const [cleanup, setCleanup] = useState<ImportOptions['cleanup']>(DEFAULT_IMPORT_OPTIONS.cleanup)
   const [sceneThreshold, setSceneThreshold] = useState(DEFAULT_IMPORT_OPTIONS.sceneThreshold)
   const [minSegSec, setMinSegSec] = useState(DEFAULT_IMPORT_OPTIONS.minSegSec)
@@ -39,41 +38,6 @@ export function ImportDialog({ files, onCancel, onConfirm }: Props) {
             </ul>
           </div>
 
-          <div className="modal-section">
-            <div className="modal-section-title">音频策略</div>
-            <div className="modal-radios">
-              <label>
-                <input
-                  type="radio"
-                  checked={audioMode === 'embed'}
-                  onChange={() => setAudioMode('embed')}
-                />
-                <span>
-                  <strong>嵌入</strong>：每段视频保留自己的原声
-                </span>
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  checked={audioMode === 'extract'}
-                  onChange={() => setAudioMode('extract')}
-                />
-                <span>
-                  <strong>抽出</strong>：视频段去音轨，源整片音频单独存入音频池（推荐）
-                </span>
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  checked={audioMode === 'none'}
-                  onChange={() => setAudioMode('none')}
-                />
-                <span>
-                  <strong>丢弃</strong>：完全不要原始音频
-                </span>
-              </label>
-            </div>
-          </div>
 
           <div className="modal-section">
             <div className="modal-section-title">指纹清洗强度</div>
@@ -168,7 +132,7 @@ export function ImportDialog({ files, onCancel, onConfirm }: Props) {
             type="button"
             className="primary-btn"
             onClick={() =>
-              onConfirm({ audioMode, cleanup, sceneThreshold, minSegSec, maxSegSec })
+              onConfirm({ audioMode: 'extract', cleanup, sceneThreshold, minSegSec, maxSegSec })
             }
           >
             开始导入

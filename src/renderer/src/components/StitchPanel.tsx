@@ -45,6 +45,7 @@ export function StitchPanel({ ffmpegOk, luts = [] }: Props) {
 
   const [status, setStatus] = useState<'idle' | 'processing' | 'error'>('idle')
   const [videoDims, setVideoDims] = useState<{ w: number; h: number } | null>(null)
+  const [mainFirstFrame, setMainFirstFrame] = useState<string | null>(null)
   const [mainDuration, setMainDuration] = useState<number | null>(null)
   const [processingPath, setProcessingPath] = useState<string | null>(null)
   const [progressInfo, setProgressInfo] = useState<ProgressInfo | null>(null)
@@ -54,7 +55,7 @@ export function StitchPanel({ ffmpegOk, luts = [] }: Props) {
     return window.scissor.onFfmpegProgress((info) => setProgressInfo(info))
   }, [])
 
-  // 选了主视频 → 探维度 + 时长
+  // 选了主视频 → 探维度 + 时长 + 首帧
   useEffect(() => {
     if (mainPaths[0]) {
       window.scissor.getVideoDims(mainPaths[0]).then((r) => {
@@ -65,9 +66,14 @@ export function StitchPanel({ ffmpegOk, luts = [] }: Props) {
         if (r.ok && r.durationSec != null) setMainDuration(r.durationSec)
         else setMainDuration(null)
       })
+      window.scissor.extractFirstFrame(mainPaths[0]).then((r) => {
+        if (r.ok && r.dataUrl) setMainFirstFrame(r.dataUrl)
+        else setMainFirstFrame(null)
+      })
     } else {
       setVideoDims(null)
       setMainDuration(null)
+      setMainFirstFrame(null)
     }
   }, [mainPaths])
 
@@ -269,6 +275,11 @@ export function StitchPanel({ ffmpegOk, luts = [] }: Props) {
             disabled={status === 'processing'}
             luts={luts}
             hide={{ concat: true, trim: false }}
+            stickerPreviewContext={
+              videoDims
+                ? { targetDims: videoDims, bgUrl: mainFirstFrame }
+                : undefined
+            }
           />
         </div>
 

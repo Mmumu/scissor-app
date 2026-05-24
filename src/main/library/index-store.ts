@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, statSync, unlinkSync } from 'node:fs'
 import type {
   AudioMeta,
+  ClipGroup,
   ClipMeta,
   ImportRecord,
   LibraryIndex,
@@ -8,7 +9,13 @@ import type {
 } from '../../shared/library'
 import { audiosDir, clipsDir, indexLockPath, indexPath, libraryRoot, resolveRel } from './paths'
 
-const EMPTY_INDEX: LibraryIndex = { version: 1, imports: [], clips: [], audios: [] }
+const EMPTY_INDEX: LibraryIndex = {
+  version: 1,
+  imports: [],
+  clips: [],
+  audios: [],
+  clipGroups: []
+}
 
 let cache: LibraryIndex | null = null
 
@@ -26,6 +33,7 @@ export function readIndex(): LibraryIndex {
     if (parsed.version !== 1) {
       throw new Error(`unsupported library index version: ${parsed.version}`)
     }
+    if (!parsed.clipGroups) parsed.clipGroups = []
     cache = parsed
     return cache
   } catch (e) {
@@ -35,12 +43,11 @@ export function readIndex(): LibraryIndex {
   }
 }
 
-/** 整体序列化写回；同进程内简单文件锁（防同进程并发写） */
+/** 整体序列化写回；同进程内简单文件锁 */
 export function writeIndex(index: LibraryIndex): void {
   const lock = indexLockPath()
   const lockExists = existsSync(lock)
   if (lockExists) {
-    // 软告警；多窗口/多导入并发会落到这里，但因为电子单进程通常没并发问题
     console.warn('[library] index.lock exists, overwriting anyway')
   }
   try {
@@ -93,6 +100,9 @@ export function removeImport(importId: string): void {
     i.imports = i.imports.filter((x) => x.id !== importId)
     i.clips = i.clips.filter((c) => c.importId !== importId)
     i.audios = i.audios.filter((a) => a.importId !== importId)
+    if (i.clipGroups) {
+      i.clipGroups = i.clipGroups.filter((g) => g.importId !== importId)
+    }
   })
 }
 
@@ -107,12 +117,124 @@ export function removeClips(ids: string[]): ClipMeta[] {
       }
       return true
     })
-    // 从对应 importRecord.clipIds 移除
     for (const imp of i.imports) {
       imp.clipIds = imp.clipIds.filter((cid) => !set.has(cid))
     }
+    if (i.clipGroups) {
+      i.clipGroups = i.clipGroups
+        .map((g) => ({ ...g, clipIds: g.clipIds.filter((cid) => !set.has(cid)) }))
+        .filter((g) => g.clipIds.length >= 1)
+    }
   })
   return removed
+}
+
+// ── 组操作 ─────────────────────────────────────────────────────
+
+export function createGroup(input: {
+  importId: string
+  clipIds: string[]
+  name?: string
+  description?: string
+}): { ok: true; group: ClipGroup } | { ok: false; error: string } {
+  if (input.clipIds.length < 1) {
+    return { ok: false, error: '请至少选 1 段' }
+  }
+  let result: ClipGroup | null = null
+  let err: string | null = null
+  mutate((i) => {
+    const imp = i.imports.find((r) => r.id === input.importId)
+    if (!imp) {
+      err = '来源不存在'
+      return
+    }
+    const idxs = input.clipIds.map((cid) => imp.clipIds.indexOf(cid))
+    if (idxs.some((x) => x < 0)) {
+      err = '所选片段不全属于该来源'
+      return
+    }
+    const sorted = [...idxs].sort((a, b) => a - b)
+    for (let k = 1; k < sorted.length; k++) {
+      if (sorted[k] !== sorted[k - 1] + 1) {
+        err = '所选片段必须在该来源里连续'
+        return
+      }
+    }
+    const ordered = sorted.map((i2) => imp.clipIds[i2])
+    if (!i.clipGroups) i.clipGroups = []
+    i.clipGroups = i.clipGroups
+      .map((g) => ({
+        ...g,
+        clipIds: g.clipIds.filter((cid) => !ordered.includes(cid))
+      }))
+      .filter((g) => g.clipIds.length >= 1)
+    const used = new Set(i.clipGroups.filter((g) => g.importId === imp.id).map((g) => g.name))
+    let autoName = input.name?.trim() || ''
+    if (!autoName) {
+      for (let k = 0; k < 26; k++) {
+        const n = `组 ${String.fromCharCode(65 + k)}`
+        if (!used.has(n)) {
+          autoName = n
+          break
+        }
+      }
+      if (!autoName) autoName = `组 ${i.clipGroups.length + 1}`
+    }
+    const desc = input.description?.trim()
+    const g: ClipGroup = {
+      id: 'grp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      importId: imp.id,
+      name: autoName,
+      ...(desc ? { description: desc.slice(0, 200) } : {}),
+      clipIds: ordered,
+      createdAt: Date.now()
+    }
+    i.clipGroups.push(g)
+    result = g
+  })
+  if (err) return { ok: false, error: err }
+  if (!result) return { ok: false, error: '创建失败' }
+  return { ok: true, group: result }
+}
+
+export function deleteGroup(groupId: string): boolean {
+  let ok = false
+  mutate((i) => {
+    if (!i.clipGroups) return
+    const before = i.clipGroups.length
+    i.clipGroups = i.clipGroups.filter((g) => g.id !== groupId)
+    ok = before !== i.clipGroups.length
+  })
+  return ok
+}
+
+export function renameGroup(groupId: string, name: string): boolean {
+  return updateGroup(groupId, { name })
+}
+
+export function updateGroup(
+  groupId: string,
+  patch: { name?: string; description?: string }
+): boolean {
+  let ok = false
+  mutate((i) => {
+    if (!i.clipGroups) return
+    const g = i.clipGroups.find((x) => x.id === groupId)
+    if (!g) return
+    if (patch.name !== undefined) {
+      const trimmed = patch.name.trim()
+      if (!trimmed) return
+      g.name = trimmed.slice(0, 32)
+      ok = true
+    }
+    if (patch.description !== undefined) {
+      const d = patch.description.trim()
+      if (d) g.description = d.slice(0, 200)
+      else delete g.description
+      ok = true
+    }
+  })
+  return ok
 }
 
 export function removeAudios(ids: string[]): AudioMeta[] {
@@ -136,12 +258,11 @@ export function removeAudios(ids: string[]): AudioMeta[] {
 export function computeStats(): LibraryStats {
   const i = readIndex()
   let bytes = 0
-  // 估算：只统计 clip 视频文件 + audio 文件
   for (const c of i.clips) {
     try {
       bytes += statSync(resolveRel(c.videoRel)).size
     } catch {
-      /* ignore missing */
+      /* ignore */
     }
   }
   for (const a of i.audios) {
@@ -159,9 +280,7 @@ export function computeStats(): LibraryStats {
   }
 }
 
-/** 仅用于初始化时确认目录存在 */
 export function bootstrap(): void {
-  // 触发 paths.ts 里的 ensureDirs
   libraryRoot()
   clipsDir()
   audiosDir()

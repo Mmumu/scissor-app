@@ -386,11 +386,36 @@ function insetPx(s: StickerItem, k: keyof Pick<StickerItem, 'insetTop' | 'insetR
   return Math.max(0, Math.round(n))
 }
 
-export function anchorToXY(s: StickerItem): string {
+/**
+ * 计算贴图在 ffmpeg overlay 滤镜中的 x:y 表达式字符串。
+ * - 静态贴图：返回 `x:y`（位置参数 positional）
+ * - march-lr：返回 `x='...':y='...'`（命名参数，因为 x 是 t 的表达式）
+ *
+ * @param durationSec 当前主视频/合成视频的时长，用于 march 贴图的终点时间默认值。
+ *                    可选，仅在 motion='march-lr' 且 endSec 未设时需要。
+ */
+export function anchorToXY(s: StickerItem, durationSec?: number): string {
   const L = insetPx(s, 'insetLeft')
   const R = insetPx(s, 'insetRight')
   const T = insetPx(s, 'insetTop')
   const B = insetPx(s, 'insetBottom')
+
+  if (s.motion === 'march-lr') {
+    const start = Math.max(0, s.startSec ?? 0)
+    const fallbackEnd = durationSec && durationSec > 0 ? durationSec : start + 1
+    const end = Math.max(start + 0.05, s.endSec ?? fallbackEnd)
+    const range = (end - start).toFixed(3)
+    const startTxt = start.toFixed(3)
+    // 真正贴到画面左右、底部三条边走：
+    //   x 从 0 → main_w - overlay_w
+    //   y = main_h - overlay_h（紧贴底）
+    // 所有 inset 在运动模式下都被忽略（仅静止贴图用）
+    // 用单引号包住整个表达式，commas 不会被滤镜参数解析器误读
+    const x = `'(main_w-overlay_w)*clip((t-${startTxt})/${range}\\,0\\,1)'`
+    const y = `'main_h-overlay_h'`
+    return `x=${x}:y=${y}`
+  }
+
   switch (s.anchor) {
     case 'top-left':
       return `${L}:${T}`
@@ -407,11 +432,20 @@ export function anchorToXY(s: StickerItem): string {
   }
 }
 
-export function enableExpr(s: StickerItem): string {
+/**
+ * 生成 overlay 的 :enable=... 段。march-lr 强制限定到 [start, end] 区间（保证非生效期不显示）。
+ */
+export function enableExpr(s: StickerItem, durationSec?: number): string {
+  if (s.motion === 'march-lr') {
+    const start = Math.max(0, s.startSec ?? 0)
+    const fallbackEnd = durationSec && durationSec > 0 ? durationSec : start + 1
+    const end = Math.max(start + 0.05, s.endSec ?? fallbackEnd)
+    return `:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'`
+  }
   if (s.startSec != null && s.endSec != null)
     return `:enable='between(t,${s.startSec},${s.endSec})'`
   if (s.startSec != null) return `:enable='gte(t,${s.startSec})'`
-  if (s.endSec != null)   return `:enable='lte(t,${s.endSec})'`
+  if (s.endSec != null) return `:enable='lte(t,${s.endSec})'`
   return ''
 }
 
@@ -588,17 +622,25 @@ export async function transformVideo(
 
   let dur = 0
   const needsTemporal = trimStart > 0 || trimEnd > 0 || middleRm > 0
-  if (needsTemporal) {
+  // march-lr 贴图也需要知道时长（用作终点的默认值）
+  const hasMarchSticker = stickers.some((s) => s.motion === 'march-lr')
+  if (needsTemporal || hasMarchSticker) {
     const d = await ffprobeDuration(ffprobe, inputPath)
     if (d == null || d <= 0) return { ok: false, error: '无法读取源视频时长' }
     dur = d
-    const Te = dur - trimEnd
-    const Ts = trimStart
-    if (Te <= Ts + 0.12) return { ok: false, error: '片头/片尾裁剪过多，剩余时长过短' }
-    if (middleRm > 0 && middleRm >= Te - Ts - 0.15) {
-      return { ok: false, error: '中间删除不能超过去掉片头尾后的有效片长' }
+    if (needsTemporal) {
+      const Te = dur - trimEnd
+      const Ts = trimStart
+      if (Te <= Ts + 0.12) return { ok: false, error: '片头/片尾裁剪过多，剩余时长过短' }
+      if (middleRm > 0 && middleRm >= Te - Ts - 0.15) {
+        return { ok: false, error: '中间删除不能超过去掉片头尾后的有效片长' }
+      }
     }
   }
+  // 贴图生效时段所参照的"成片时长"：裁剪后会变短
+  const effectiveDur = needsTemporal
+    ? Math.max(0.05, dur - trimStart - trimEnd - middleRm)
+    : dur
 
   const lutPath = opts.lut.path
   const needsComplex = needsTemporal || stickers.length > 0 || bottomR > 0 || !!lutPath
@@ -751,7 +793,7 @@ export async function transformVideo(
         }
         fcParts.push(`[${i + 1}:v]${scaleChain}[st${i}]`)
         fcParts.push(
-          `${pipeBase}[st${i}]overlay=${anchorToXY(s)}${enableExpr(s)}:shortest=1${outTag}`
+          `${pipeBase}[st${i}]overlay=${anchorToXY(s, effectiveDur)}${enableExpr(s, effectiveDur)}:shortest=1${outTag}`
         )
         pipeBase = outTag
       })

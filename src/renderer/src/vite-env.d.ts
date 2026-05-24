@@ -9,6 +9,7 @@ import type {
 import type { ObfuscationOptions } from '../../shared/obfuscation'
 import type {
   AudioMeta,
+  ClipGroup,
   ImportOptions,
   ImportProgressEvent,
   LibraryIndex,
@@ -21,8 +22,25 @@ import type {
   MixRenderProgressEvent,
   MixRenderRequest,
   MixRenderResult,
-  MixTimeline
+  MixTimeline,
+  ReferenceSegment
 } from '../../shared/mix'
+
+type AnalyzeReferenceRequest = {
+  path: string
+  threshold?: number
+  minSegSec?: number
+  maxSegSec?: number
+}
+type AnalyzeReferenceResult =
+  | {
+      ok: true
+      durationSec: number
+      sizeBytes: number
+      segments: ReferenceSegment[]
+      threshold: number
+    }
+  | { ok: false; error: string }
 
 export {}
 
@@ -75,6 +93,9 @@ declare global {
       dedupeScan: (paths: string[]) => Promise<{ ok: boolean; groups?: DedupeGroup[]; error?: string }>
       ffprobeDuration: (path: string) => Promise<{ ok: boolean; durationSec?: number; error?: string }>
       getVideoDims: (path: string) => Promise<{ ok: boolean; w?: number; h?: number; error?: string }>
+      extractFirstFrame: (
+        path: string
+      ) => Promise<{ ok: boolean; dataUrl?: string; error?: string }>
       exportTimeline: (
         clips: TimelineClip[],
         outPath: string
@@ -104,6 +125,24 @@ declare global {
           rel: string
         ) => Promise<{ ok: boolean; base64?: string; mime?: string; error?: string }>
         rootDir: () => Promise<string>
+        getSourceVideoUrl: (
+          importId: string
+        ) => Promise<
+          | { ok: true; url: string; sourcePath: string; exists: boolean }
+          | { ok: false; error: string }
+        >
+        createGroup: (input: {
+          importId: string
+          clipIds: string[]
+          name?: string
+          description?: string
+        }) => Promise<{ ok: true; group: ClipGroup } | { ok: false; error: string }>
+        deleteGroup: (groupId: string) => Promise<{ ok: boolean }>
+        renameGroup: (groupId: string, name: string) => Promise<{ ok: boolean }>
+        updateGroup: (
+          groupId: string,
+          patch: { name?: string; description?: string }
+        ) => Promise<{ ok: boolean }>
         onImportProgress: (cb: (ev: ImportProgressEvent) => void) => () => void
       }
       mix: {
@@ -115,6 +154,17 @@ declare global {
         loadProject: (id: string) => Promise<MixProjectMeta | null>
         deleteProject: (id: string) => Promise<void>
         onProgress: (cb: (ev: MixRenderProgressEvent) => void) => () => void
+        pickReferenceVideo: () => Promise<string | undefined>
+        analyzeReference: (req: AnalyzeReferenceRequest) => Promise<AnalyzeReferenceResult>
+        readReferenceBytes: (
+          path: string
+        ) => Promise<
+          | { ok: true; base64: string; mime: string; sizeBytes: number }
+          | { ok: false; error: string; sizeBytes?: number }
+        >
+        probeReferenceMeta: (
+          path: string
+        ) => Promise<{ ok: boolean; durationSec?: number; sizeBytes?: number; error?: string }>
       }
     }
   }

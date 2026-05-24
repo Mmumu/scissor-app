@@ -98,6 +98,13 @@ export type StickerItem = {
   startSec: number | null
   /** 结束秒（null = 到尾） */
   endSec: number | null
+  /**
+   * 运动模式：
+   * - 'static'   : 固定位置（默认，由 anchor / custom 决定）
+   * - 'march-lr' : 沿底部从左到右匀速走过整个生效时段
+   *                Y 强制使用 insetBottom；X 从 insetLeft 走到 main_w-overlay_w-insetRight
+   */
+  motion?: 'static' | 'march-lr'
 }
 
 /** ffprobe + optional whole-file MD5 (MD5 仅在对比时按需计算，避免大文件卡顿) */

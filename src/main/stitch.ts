@@ -186,6 +186,14 @@ export async function stitchVideo(
   const stickers = obf.stickers || []
   let pipeBase = '[vcat]'
   if (stickers.length > 0) {
+    // march-lr 贴图需要总时长来推算终点
+    let stickerDur = 0
+    if (stickers.some((s) => s.motion === 'march-lr')) {
+      const d = await ffprobeDurationSafe(ffprobe, mainPath)
+      if (d && d > 0) {
+        stickerDur = needsTrim ? Math.max(0.05, d - startTrimSec - trimEndSec) : d
+      }
+    }
     stickers.forEach((s, i) => {
       const alpha = Math.min(1, Math.max(0, s.opacity ?? 1)).toFixed(4)
       const fracRaw = s.widthFrac ?? 0
@@ -199,7 +207,9 @@ export async function stitchVideo(
         scaleChain = `scale=iw:-1:flags=lanczos,format=rgba,colorchannelmixer=aa=${alpha}`
       }
       fcParts.push(`[${i + 2}:v]${scaleChain}[stimg${i}]`)
-      fcParts.push(`${pipeBase}[stimg${i}]overlay=${anchorToXY(s)}${enableExpr(s)}:shortest=1${outTag}`)
+      fcParts.push(
+        `${pipeBase}[stimg${i}]overlay=${anchorToXY(s, stickerDur)}${enableExpr(s, stickerDur)}:shortest=1${outTag}`
+      )
       pipeBase = outTag
     })
   }

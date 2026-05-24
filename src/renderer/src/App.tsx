@@ -28,6 +28,8 @@ export default function App() {
 
   const [luts, setLuts] = useState<{ name: string; path: string }[]>([])
   const [mainDuration, setMainDuration] = useState<number | null>(null)
+  const [mainDims, setMainDims] = useState<{ w: number; h: number } | null>(null)
+  const [mainFirstFrame, setMainFirstFrame] = useState<string | null>(null)
 
   // 比对
   const [compareA, setCompareA] = useState<string | null>(null)
@@ -68,8 +70,18 @@ export default function App() {
         if (r.ok && r.durationSec != null) setMainDuration(r.durationSec)
         else setMainDuration(null)
       })
+      window.scissor.getVideoDims(inputPaths[0]).then((r) => {
+        if (r.ok && r.w && r.h) setMainDims({ w: r.w, h: r.h })
+        else setMainDims(null)
+      })
+      window.scissor.extractFirstFrame(inputPaths[0]).then((r) => {
+        if (r.ok && r.dataUrl) setMainFirstFrame(r.dataUrl)
+        else setMainFirstFrame(null)
+      })
     } else {
       setMainDuration(null)
+      setMainDims(null)
+      setMainFirstFrame(null)
     }
   }, [inputPaths])
 
@@ -375,6 +387,11 @@ export default function App() {
                   onChange={setObfOpts}
                   disabled={status === 'processing'}
                   luts={luts}
+                  stickerPreviewContext={
+                    mainDims
+                      ? { targetDims: mainDims, bgUrl: mainFirstFrame }
+                      : undefined
+                  }
                 />
 
                 <div className="run-area">

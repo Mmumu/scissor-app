@@ -4,7 +4,8 @@ import type { AudioMeta } from '../../../../shared/library'
 type Props = {
   audio: AudioMeta
   selected?: boolean
-  onSelect?: (selected: boolean) => void
+  /** 把原始鼠标事件透出，方便父组件做 shift / cmd 范围选择 */
+  onSelect?: (e: React.MouseEvent) => void
   onDelete?: () => void
 }
 
@@ -62,7 +63,7 @@ export function AudioCard({ audio, selected, onSelect, onDelete }: Props) {
   }, [audioUrl])
 
   return (
-    <div className={`audio-card ${selected ? 'selected' : ''}`} onClick={() => onSelect?.(!selected)}>
+    <div className={`audio-card ${selected ? 'selected' : ''}`} onClick={(e) => onSelect?.(e)}>
       <div className="audio-card-wave">
         {waveform ? <img src={waveform} alt="" draggable={false} /> : <div className="audio-card-loading">···</div>}
         <button

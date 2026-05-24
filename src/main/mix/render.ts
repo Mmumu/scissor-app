@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdirSync, rmSync, existsSync } from 'node:fs'
+import { copyFileSync, mkdirSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import { ffprobeHasAudio, ffprobeVideoDims, transformVideo } from '../ffmpeg-utils'
@@ -40,14 +40,42 @@ export async function renderMix(
     const clipMap = new Map(idx.clips.map((c) => [c.id, c]))
     const audioMap = new Map(idx.audios.map((a) => [a.id, a]))
 
-    const clips = timeline.clipIds.map((id) => clipMap.get(id)).filter(Boolean) as ClipMeta[]
-    if (clips.length === 0) {
+    // 按 clipIds 顺序解出 clip 元数据 + 子段裁剪信息
+    type Input = {
+      clip: ClipMeta
+      path: string
+      startSec?: number
+      durationSec?: number
+      effectiveDur: number
+    }
+    const overrides = timeline.clipOverrides ?? {}
+    const inputs: Input[] = []
+    timeline.clipIds.forEach((id, i) => {
+      const c = clipMap.get(id)
+      if (!c) return
+      const ov = overrides[i]
+      const start = Math.max(0, ov?.startSec ?? 0)
+      const durRaw = ov?.durationSec
+      const maxAvail = Math.max(0.05, c.durationSec - start)
+      const dur = durRaw != null ? Math.min(Math.max(0.05, durRaw), maxAvail) : maxAvail
+      inputs.push({
+        clip: c,
+        path: resolveRel(c.videoRel),
+        startSec: start > 0 ? start : undefined,
+        durationSec:
+          ov?.durationSec != null && Math.abs(dur - c.durationSec) > 0.02 ? dur : undefined,
+        effectiveDur: dur
+      })
+    })
+
+    if (inputs.length === 0) {
       return { ok: false, error: '时间线为空：没有可用片段' }
     }
-    const clipPaths = clips.map((c) => resolveRel(c.videoRel))
-    for (const p of clipPaths) {
-      if (!existsSync(p)) return { ok: false, error: `文件丢失: ${p}` }
+    for (const it of inputs) {
+      if (!existsSync(it.path)) return { ok: false, error: `文件丢失: ${it.path}` }
     }
+    const clips = inputs.map((i) => i.clip)
+    const clipPaths = inputs.map((i) => i.path)
 
     // 决定目标分辨率
     const firstDims =
@@ -84,14 +112,18 @@ export async function renderMix(
     const stage2Path = join(workDir, 'stage2.mp4')
 
     try {
-      // 总时长用于进度估算
-      const totalDur = clips.reduce((a, c) => a + c.durationSec, 0)
+      // 总时长用于进度估算（应用 override 后的有效时长）
+      const totalDur = inputs.reduce((a, i) => a + i.effectiveDur, 0)
 
       // === Stage 1: concat ===
       onProgress({ phase: 'concat', pct: 0 })
       await runConcat(
         ffmpeg,
-        clipPaths,
+        inputs.map((i) => ({
+          path: i.path,
+          startSec: i.startSec,
+          durationSec: i.durationSec
+        })),
         stage1Path,
         target,
         audioMode === 'embed',
@@ -117,7 +149,14 @@ export async function renderMix(
         // 后续 transformVideo 看到无音轨会自动 -an
       }
 
-      // === Stage 2: 应用 obfuscation ===
+      // === Stage 2: 应用 obfuscation（或跳过）===
+      if (req.skipObfuscation) {
+        // 直接把当前阶段产物拷贝到目标路径，跳过过原创处理
+        copyFileSync(stageForObf, outputPath)
+        onProgress({ phase: 'done', outputPath })
+        return { ok: true, outputPath }
+      }
+
       onProgress({ phase: 'obfuscation', pct: 0 })
       const r = await transformVideo(
         ffmpeg,
@@ -178,19 +217,25 @@ export function buildConcatFilterComplex(
       parts.push(`[${i}:a]aformat=sample_rates=44100:channel_layouts=stereo[a${i}]`)
     }
   }
-  const vRefs = Array.from({ length: n }, (_, i) => `[v${i}]`).join('')
-  const aRefs = withAudio ? Array.from({ length: n }, (_, i) => `[a${i}]`).join('') : ''
+  // concat 滤镜的输入 pad 顺序：按段交错 v、a（每段 v 紧跟 a），不能所有 v 再所有 a
+  let refs = ''
+  for (let i = 0; i < n; i++) {
+    refs += `[v${i}]`
+    if (withAudio) refs += `[a${i}]`
+  }
   if (withAudio) {
-    parts.push(`${vRefs}${aRefs}concat=n=${n}:v=1:a=1[outv][outa]`)
+    parts.push(`${refs}concat=n=${n}:v=1:a=1[outv][outa]`)
   } else {
-    parts.push(`${vRefs}concat=n=${n}:v=1:a=0[outv]`)
+    parts.push(`${refs}concat=n=${n}:v=1:a=0[outv]`)
   }
   return parts.join(';')
 }
 
+type ConcatInput = { path: string; startSec?: number; durationSec?: number }
+
 function runConcat(
   ffmpeg: string,
-  inputs: string[],
+  inputs: ConcatInput[],
   outPath: string,
   target: { w: number; h: number },
   withAudio: boolean,
@@ -199,7 +244,17 @@ function runConcat(
   signal?: AbortSignal
 ): Promise<void> {
   const args: string[] = ['-hide_banner', '-loglevel', 'error', '-stats']
-  for (const p of inputs) args.push('-i', p)
+  for (const inp of inputs) {
+    // 输入级裁剪：-ss <start> -t <dur> -i <path>
+    // 快、走关键帧——库里 clip 都是重编过的、Key frame 密集，足够精确
+    if (inp.startSec != null && inp.startSec > 0) {
+      args.push('-ss', inp.startSec.toFixed(3))
+    }
+    if (inp.durationSec != null && inp.durationSec > 0) {
+      args.push('-t', inp.durationSec.toFixed(3))
+    }
+    args.push('-i', inp.path)
+  }
   args.push(
     '-filter_complex',
     buildConcatFilterComplex(inputs.length, target, withAudio),
