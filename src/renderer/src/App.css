@@ -5405,3 +5405,412 @@ body {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
+
+/* ─────────────────────────────────────────────────────────────
+ * 帧级手动切片与标注模态框高级样式
+ * ───────────────────────────────────────────────────────────── */
+
+.source-grouping-head-wrapper {
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.source-grouping-tabs {
+  display: flex;
+  padding: 0 14px;
+  gap: 4px;
+}
+
+.source-grouping-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text3);
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.source-grouping-tab:hover {
+  color: var(--text1);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.source-grouping-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: rgba(108, 99, 255, 0.05);
+}
+
+/* 手动切片双栏主体 */
+.source-grouping-cut-body {
+  display: flex;
+  flex-direction: row;
+  gap: 20px;
+  flex: 1;
+  overflow: hidden;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.source-grouping-cut-left {
+  flex: 1.3;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.source-grouping-cut-right {
+  flex: 0.7;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.source-grouping-player-wrap.compact {
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+/* 高精度进度条控制 */
+.precision-scrub-bar {
+  position: relative;
+  width: 100%;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  margin-top: 10px;
+  cursor: pointer;
+  overflow: visible;
+  border: 1px solid rgba(255, 255, 255, 0.02);
+}
+
+.precision-scrub-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  border-radius: 6px;
+  width: 0;
+  transition: width 0.05s linear;
+}
+
+.precision-marker {
+  position: absolute;
+  top: -2px;
+  width: 3px;
+  height: 16px;
+  border-radius: 1.5px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.precision-marker.in {
+  background: #f97316;
+  box-shadow: 0 0 6px #f97316;
+}
+
+.precision-marker.out {
+  background: #ec4899;
+  box-shadow: 0 0 6px #ec4899;
+}
+
+.source-grouping-now-playing.compact {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text2);
+}
+
+/* 逐帧控制面板 */
+.precision-control-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.precision-control-row {
+  display: flex;
+  align-items: center;
+}
+
+.justify-center {
+  justify-content: center;
+}
+
+.gap-10 {
+  gap: 10px;
+}
+
+.margin-top-10 {
+  margin-top: 10px;
+}
+
+/* 标记按钮样式 */
+.mark-btn {
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  background: var(--surface2);
+  color: var(--text2);
+  transition: all 0.2s;
+}
+
+.mark-btn.in {
+  border-color: rgba(249, 115, 22, 0.4);
+}
+.mark-btn.in.active {
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
+  border-color: #f97316;
+}
+
+.mark-btn.out {
+  border-color: rgba(236, 72, 153, 0.4);
+}
+.mark-btn.out.active {
+  background: rgba(236, 72, 153, 0.15);
+  color: #ec4899;
+  border-color: #ec4899;
+}
+
+.add-seg-btn {
+  padding: 6px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.add-seg-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.add-seg-btn:disabled {
+  background: var(--surface2);
+  color: var(--text3);
+  cursor: not-allowed;
+}
+
+/* 临时选区预览 */
+.temp-range-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text2);
+  padding: 8px 12px;
+  background: rgba(249, 115, 22, 0.05);
+  border: 1px dashed rgba(249, 115, 22, 0.25);
+  border-radius: 6px;
+  margin-top: 4px;
+}
+
+.temp-range-display .bullet.orange {
+  width: 6px;
+  height: 6px;
+  background: #f97316;
+  border-radius: 50%;
+}
+
+.dur-badge {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-family: monospace;
+  font-weight: 600;
+  color: var(--text1);
+}
+
+.precision-shortcuts-hint {
+  font-size: 10px;
+  color: var(--text3);
+  text-align: center;
+  margin-top: 4px;
+}
+
+.precision-shortcuts-hint kbd {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+/* 待切片队列列表 */
+.cut-queue-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.cut-queue-header h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text1);
+}
+
+.cut-queue-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cut-queue-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  padding: 40px 20px;
+  color: var(--text3);
+  text-align: center;
+}
+
+.cut-queue-empty .empty-icon {
+  font-size: 28px;
+  margin-bottom: 10px;
+  opacity: 0.3;
+}
+
+.cut-queue-empty p {
+  margin: 0 0 4px;
+  font-size: 12px;
+}
+
+.cut-queue-empty p.sub {
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.cut-queue-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.cut-queue-item:hover {
+  border-color: rgba(108, 99, 255, 0.4);
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.cut-item-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cut-item-idx {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  background: rgba(108, 99, 255, 0.1);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cut-item-range {
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--text2);
+}
+
+.cut-item-dur {
+  font-size: 10px;
+  color: var(--text3);
+  margin-top: 2px;
+}
+
+.cut-item-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.cut-item-actions .icon-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+/* 清洗选项 */
+.cleaning-select select {
+  font-size: 11px;
+  padding: 2px 6px;
+}
+
+.danger-btn-themed {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: white;
+  border: none;
+  font-weight: 600;
+}
+
+.danger-btn-themed:hover:not(:disabled) {
+  opacity: 0.95;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.3);
+}
+
+/* 内置切片进度面板 */
+.inner-import-progress-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.inner-import-progress-card {
+  width: 440px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+  overflow: hidden;
+}
+
+.inner-import-progress-card .import-progress {
+  box-shadow: none;
+  border: none;
+  background: transparent;
+  padding: 16px;
+}
+

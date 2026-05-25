@@ -96,20 +96,34 @@ async function importSingle(
   mkdirSync(tmpWork, { recursive: true })
 
   try {
-    // ① 在源视频上做 scene detect（像素更准，不受清洗模糊影响）
-    onProgress({ phase: 'detecting', sourcePath, importId, pct: 0 })
-    const cuts = await detectScenes(
-      ffmpeg,
-      sourcePath,
-      duration,
-      { threshold: opts.sceneThreshold },
-      (pct) => onProgress({ phase: 'detecting', sourcePath, importId, pct })
-    )
-    const segments = consolidate(cuts, {
-      minSegSec: opts.minSegSec,
-      maxSegSec: opts.maxSegSec
-    })
-    if (segments.length === 0) segments.push({ startSec: 0, endSec: duration })
+    // ① 决定是手动切片还是自动镜头检测（像素更准，不受清洗模糊影响）
+    let segments: { startSec: number; endSec: number }[] = []
+    if (opts.manualSegments && opts.manualSegments.length > 0) {
+      // 过滤并确保片段合法，按时间排序
+      segments = opts.manualSegments
+        .filter((s) => s.startSec >= 0 && s.endSec > s.startSec && s.startSec < duration)
+        .map((s) => ({
+          startSec: s.startSec,
+          endSec: Math.min(duration, s.endSec)
+        }))
+        .sort((a, b) => a.startSec - b.startSec)
+    }
+
+    if (segments.length === 0) {
+      onProgress({ phase: 'detecting', sourcePath, importId, pct: 0 })
+      const cuts = await detectScenes(
+        ffmpeg,
+        sourcePath,
+        duration,
+        { threshold: opts.sceneThreshold },
+        (pct) => onProgress({ phase: 'detecting', sourcePath, importId, pct })
+      )
+      segments = consolidate(cuts, {
+        minSegSec: opts.minSegSec,
+        maxSegSec: opts.maxSegSec
+      })
+      if (segments.length === 0) segments.push({ startSec: 0, endSec: duration })
+    }
 
     // 切点时间（除掉起点 0）：这些时间会被强制变成关键帧 + segment_times
     const cutTimes = segments.slice(1).map((s) => s.startSec)

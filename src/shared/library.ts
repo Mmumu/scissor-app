@@ -27,6 +27,7 @@ export type ImportOptions = {
   maxSegSec: number // > 此长度的段强切，默认 6.0
   /** 若 sourceHash 已存在，是 'skip' / 'reimport-replace' / 'reimport-add' */
   duplicatePolicy?: 'skip' | 'reimport-replace' | 'reimport-add'
+  manualSegments?: { startSec: number; endSec: number }[]
 }
 
 export type ImportProgressEvent =
