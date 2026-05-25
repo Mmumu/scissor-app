@@ -4335,6 +4335,10 @@ body {
   background: linear-gradient(90deg, #22c55e, #16a34a);
 }
 
+.mix-audio-compare-fill.audio.warning {
+  background: linear-gradient(90deg, #f59e0b, #d97706);
+}
+
 .mix-audio-compare-val {
   font-size: 11px;
   font-family: monospace;

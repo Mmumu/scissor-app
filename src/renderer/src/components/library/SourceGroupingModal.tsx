@@ -35,6 +35,9 @@ export function SourceGroupingModal({
   const [groupDescription, setGroupDescription] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [activeRange, setActiveRange] = useState<{ start: number; end: number } | null>(null)
+  const activeRangeRef = useRef<{ start: number; end: number } | null>(null)
+  activeRangeRef.current = activeRange
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const lastThumbClickRef = useRef<number | null>(null)
 
@@ -91,7 +94,17 @@ export function SourceGroupingModal({
   useEffect(() => {
     const el = videoRef.current
     if (!el) return
-    const syncTime = (): void => setPlayhead(el.currentTime || 0)
+    const syncTime = (): void => {
+      const cur = el.currentTime || 0
+      setPlayhead(cur)
+      const range = activeRangeRef.current
+      if (range && cur >= range.end) {
+        el.pause()
+        el.currentTime = range.start
+        setPlayhead(range.start)
+        setActiveRange(null)
+      }
+    }
     const onPlay = (): void => setPlaying(true)
     const onPause = (): void => setPlaying(false)
     const onMeta = (): void => {
@@ -134,7 +147,10 @@ export function SourceGroupingModal({
   }, [])
 
   const handleSeek = useCallback(
-    (sec: number) => {
+    (sec: number, keepRange = false) => {
+      if (!keepRange) {
+        setActiveRange(null)
+      }
       const cap = timelineDur || vidDur || sec
       const t = Math.max(0, Math.min(sec, cap))
       const el = videoRef.current
@@ -426,7 +442,12 @@ export function SourceGroupingModal({
   function handleThumbClick(idx: number, e: React.MouseEvent): void {
     const c = clips[idx]
     if (!c) return
-    handleSeek(c.sourceStartSec)
+    handleSeek(c.sourceStartSec, true)
+    setActiveRange({ start: c.sourceStartSec, end: c.sourceEndSec })
+    const el = videoRef.current
+    if (el) {
+      el.play().catch(() => {})
+    }
     if (e.shiftKey && lastThumbClickRef.current != null) {
       const a = Math.min(lastThumbClickRef.current, idx)
       const b = Math.max(lastThumbClickRef.current, idx)

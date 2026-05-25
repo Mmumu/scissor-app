@@ -123,7 +123,7 @@ async function importSingle(
       cleanedPath,
       opts,
       duration,
-      hasAudio && opts.audioMode !== 'none',
+      hasAudio,
       cutTimes,
       (pct) => onProgress({ phase: 'cleaning', sourcePath, importId, pct }),
       signal
@@ -140,7 +140,7 @@ async function importSingle(
       segDir,
       cutSecsCsv,
       duration,
-      hasAudio && opts.audioMode === 'embed',
+      hasAudio,
       (pct) => onProgress({ phase: 'segmenting', sourcePath, importId, pct }),
       signal
     )
@@ -185,7 +185,7 @@ async function importSingle(
         width: dims.w,
         height: dims.h,
         fps: 0,
-        hasAudio: hasAudio && opts.audioMode === 'embed',
+        hasAudio: hasAudio,
         videoRel,
         thumbRel,
         createdAt: Date.now()
@@ -196,7 +196,7 @@ async function importSingle(
 
     // ⑤ 抽出完整音轨（extract 模式）
     let audioId: string | undefined
-    if (hasAudio && opts.audioMode === 'extract') {
+    if (hasAudio) {
       onProgress({ phase: 'audio', sourcePath, importId })
       audioId = makeId('aud')
       const audioRel = join('audios', `${audioId}.m4a`)

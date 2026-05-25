@@ -387,6 +387,42 @@ export function MixWorkspace({
                 音频比视频短时循环
               </label>
             )}
+            {audioMode === 'embed' && (() => {
+              const audioDur = orderedClips.reduce((a, c) => a + (c.hasAudio ? c.durationSec : 0), 0)
+              const hasSilentClips = orderedClips.some((c) => !c.hasAudio)
+              const maxDur = Math.max(totalDur, audioDur, 0.01)
+              const videoPct = (totalDur / maxDur) * 100
+              const audioPct = (audioDur / maxDur) * 100
+              return (
+                <div className="mix-audio-compare">
+                  <div className="mix-audio-compare-row">
+                    <span className="mix-audio-compare-label">🎬 视频</span>
+                    <div className="mix-audio-compare-bar">
+                      <div
+                        className="mix-audio-compare-fill video"
+                        style={{ width: `${videoPct}%` }}
+                      />
+                    </div>
+                    <span className="mix-audio-compare-val">{totalDur.toFixed(1)}s</span>
+                  </div>
+                  <div className="mix-audio-compare-row">
+                    <span className="mix-audio-compare-label">♪ 音频</span>
+                    <div className="mix-audio-compare-bar">
+                      <div
+                        className={`mix-audio-compare-fill audio ${hasSilentClips ? 'warning' : ''}`}
+                        style={{ width: `${audioPct}%` }}
+                      />
+                    </div>
+                    <span className="mix-audio-compare-val">{audioDur.toFixed(1)}s</span>
+                  </div>
+                  <div className="mix-audio-compare-diff">
+                    {hasSilentClips
+                      ? '⚠️ 存在无音轨的片段，跟随片段模式下整段视频将被静音！'
+                      : '✓ 所有片段均有音轨，时长完全匹配'}
+                  </div>
+                </div>
+              )
+            })()}
             {audioMode === 'replace' && (() => {
               const audioDur = orderedAudios.reduce((a, x) => a + x.durationSec, 0)
               const diff = audioDur - totalDur

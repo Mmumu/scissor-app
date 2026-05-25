@@ -134,7 +134,10 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
         }
         return [...prev, item]
       })
-      if (ev.phase === 'done' || ev.phase === 'error') {
+      if (ev.phase === 'done') {
+        reload()
+        if (ev.importId) setSourceGroupingImportId(ev.importId)
+      } else if (ev.phase === 'error') {
         reload()
       }
     })
