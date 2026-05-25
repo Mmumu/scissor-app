@@ -2144,8 +2144,7 @@ body {
   padding-right: 56px;
 }
 
-.randomcut-aside-x,
-.randomcut-aside-icon-btn {
+.randomcut-aside-x {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
@@ -2160,19 +2159,44 @@ body {
   display: none;
   align-items: center;
   justify-content: center;
+  right: 4px;
 }
 
-.randomcut-aside-x { right: 4px; }
-.randomcut-aside-icon-btn { right: 28px; }
+.randomcut-aside-icon-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: none;
+  background: rgba(108, 99, 255, 0.08);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  right: 28px;
+  opacity: 0.7;
+  transition: all 0.2s ease;
+  border: 1px solid rgba(108, 99, 255, 0.2);
+}
 
-.randomcut-aside-source:hover .randomcut-aside-x,
-.randomcut-aside-source:hover .randomcut-aside-icon-btn {
+.randomcut-aside-source:hover .randomcut-aside-x {
   display: inline-flex;
 }
 
+.randomcut-aside-source:hover .randomcut-aside-icon-btn {
+  opacity: 1;
+}
+
 .randomcut-aside-icon-btn:hover {
-  background: rgba(108, 99, 255, 0.18);
-  color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  transform: translateY(-50%) scale(1.1);
+  box-shadow: 0 0 8px rgba(108, 99, 255, 0.5);
 }
 
 .randomcut-aside-x:hover {
@@ -5813,4 +5837,108 @@ body {
   background: transparent;
   padding: 16px;
 }
+
+/* ─────────────────────────────────────────────────────────────
+ * 手动切片视频选择器样式
+ * ───────────────────────────────────────────────────────────── */
+
+.manual-cut-selector-card {
+  width: 520px;
+}
+
+.manual-cut-import-dropbox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: rgba(108, 99, 255, 0.03);
+  border: 1px dashed rgba(108, 99, 255, 0.35);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.manual-cut-import-dropbox:hover {
+  background: rgba(108, 99, 255, 0.07);
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(108, 99, 255, 0.15);
+}
+
+.manual-cut-import-dropbox .plus-icon {
+  font-size: 28px;
+  color: var(--accent);
+  margin-bottom: 8px;
+  line-height: 1;
+}
+
+.manual-cut-import-dropbox strong {
+  font-size: 13px;
+  color: var(--text1);
+  margin-bottom: 4px;
+}
+
+.manual-cut-import-dropbox .desc {
+  font-size: 11px;
+  color: var(--text3);
+}
+
+.manual-cut-selector-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text3);
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+}
+
+.manual-cut-sources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.manual-cut-source-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.manual-cut-source-row:hover {
+  border-color: rgba(108, 99, 255, 0.35);
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.manual-cut-source-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.manual-cut-source-info .name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manual-cut-source-info .time {
+  font-size: 10px;
+  color: var(--text3);
+  flex-shrink: 0;
+}
+
 

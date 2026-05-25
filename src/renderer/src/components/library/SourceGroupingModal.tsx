@@ -16,6 +16,7 @@ type Props = {
   importColor: string
   onClose: () => void
   onCreated: () => void // 父级在成功后用来 reload index
+  initialMode?: 'group' | 'cut'
 }
 
 type MarkedSegment = {
@@ -29,9 +30,10 @@ export function SourceGroupingModal({
   importRec,
   importColor,
   onClose,
-  onCreated
+  onCreated,
+  initialMode
 }: Props) {
-  const [mode, setMode] = useState<'group' | 'cut'>('group')
+  const [mode, setMode] = useState<'group' | 'cut'>(initialMode ?? 'group')
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [sourceMissing, setSourceMissing] = useState(false)
   const [sourcePath, setSourcePath] = useState<string>('')

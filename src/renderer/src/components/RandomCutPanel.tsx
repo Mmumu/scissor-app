@@ -55,6 +55,8 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
   } | null>(null)
   const [mixOpen, setMixOpen] = useState(false)
   const [sourceGroupingImportId, setSourceGroupingImportId] = useState<string | null>(null)
+  const [sourceGroupingInitialMode, setSourceGroupingInitialMode] = useState<'group' | 'cut'>('group')
+  const [manualCutSourceSelectorOpen, setManualCutSourceSelectorOpen] = useState(false)
   const [pendingGroupDesc, setPendingGroupDesc] = useState('')
   const lastImportOptsRef = useRef<Omit<ImportOptions, 'paths'> | null>(null)
   // shift+click 的锚点：记录最近一次普通点击在 visibleClips/visibleAudios 列表里的下标
@@ -155,6 +157,22 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
     const paths = await window.scissor.pickVideos()
     if (!paths || paths.length === 0) return
     setPickedFiles(paths)
+  }
+
+  async function handlePickVideosForManualCut(): Promise<void> {
+    const paths = await window.scissor.pickVideos()
+    if (!paths || paths.length === 0) return
+    setManualCutSourceSelectorOpen(false)
+    setSourceGroupingInitialMode('cut')
+    // 采用免镜头切片配置快速导入占位，极速秒级入库
+    await window.scissor.library.importVideos({
+      paths: [paths[0]],
+      audioMode: 'extract',
+      cleanup: 'metadata-only',
+      sceneThreshold: 1.0,
+      minSegSec: 0.1,
+      maxSegSec: 999999
+    })
   }
 
   async function handleImport(opts: Omit<ImportOptions, 'paths'>): Promise<void> {
@@ -426,6 +444,9 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
           <button type="button" className="primary-btn" onClick={handlePickVideos} disabled={!ffmpegOk}>
             + 导入视频
           </button>
+          <button type="button" className="ghost-btn px-12" onClick={() => setManualCutSourceSelectorOpen(true)} disabled={!ffmpegOk} title="逐帧手动精确切片与剪辑视频">
+            ✂ 手动精确切片
+          </button>
           <button type="button" className="ghost-btn" onClick={handleAddAudio} disabled={!ffmpegOk}>
             + 添加音频
           </button>
@@ -485,9 +506,10 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
                       className="randomcut-aside-icon-btn"
                       onClick={(e) => {
                         e.stopPropagation()
+                        setSourceGroupingInitialMode('group')
                         setSourceGroupingImportId(rec.id)
                       }}
-                      title="对照原视频成组"
+                      title="对照原视频成组 / 手动精准切片"
                     >
                       🎬
                     </button>
@@ -837,9 +859,73 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
               importColor={importColors.get(rec.id) ?? '#666'}
               onClose={() => setSourceGroupingImportId(null)}
               onCreated={reload}
+              initialMode={sourceGroupingInitialMode}
             />
           )
         })()}
+
+      {manualCutSourceSelectorOpen && (
+        <div className="modal-overlay" onClick={() => setManualCutSourceSelectorOpen(false)}>
+          <div className="modal-card manual-cut-selector-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3>✂ 手动精准切片与视频剪辑</h3>
+              <button type="button" className="del-btn" onClick={() => setManualCutSourceSelectorOpen(false)}>×</button>
+            </div>
+            
+            <div className="modal-body">
+              {/* 本地新视频 */}
+              <div className="modal-section">
+                <div className="modal-section-title">导入本地视频文件</div>
+                <div 
+                  className="manual-cut-import-dropbox"
+                  onClick={handlePickVideosForManualCut}
+                >
+                  <span className="plus-icon">＋</span>
+                  <strong>选择本地视频文件</strong>
+                  <span className="desc">极速秒级加载，以帧级精度手动分割并提取你需要的黄金片段</span>
+                </div>
+              </div>
+
+              {/* 已导入视频 */}
+              <div className="modal-section">
+                <div className="modal-section-title">或者从素材池中选择已导入的视频 ({index.imports.length})</div>
+                {index.imports.length === 0 ? (
+                  <div className="manual-cut-selector-empty">
+                    当前素材池暂无已导入的原视频。请在上方导入本地视频文件。
+                  </div>
+                ) : (
+                  <div className="manual-cut-sources-list">
+                    {index.imports.map((rec) => (
+                      <div key={rec.id} className="manual-cut-source-row">
+                        <div className="manual-cut-source-info">
+                          <span className="source-dot" style={{ background: importColors.get(rec.id) }} />
+                          <span className="name" title={rec.sourcePath}>{basename(rec.sourcePath)}</span>
+                          <span className="time">{rec.clipIds.length}段已切 · {new Date(rec.importedAt).toLocaleDateString()}</span>
+                        </div>
+                        <button
+                          type="button"
+                          className="primary-btn small"
+                          onClick={() => {
+                            setManualCutSourceSelectorOpen(false)
+                            setSourceGroupingInitialMode('cut')
+                            setSourceGroupingImportId(rec.id)
+                          }}
+                        >
+                          开始切片 ✂
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="modal-foot">
+              <button type="button" className="ghost-btn" onClick={() => setManualCutSourceSelectorOpen(false)}>取消</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
