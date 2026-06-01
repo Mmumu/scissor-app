@@ -9,6 +9,7 @@ import {
   ffmpegMissingUserHint,
   ffprobeDuration,
   ffprobeVideoDims,
+  ffprobeVideoFps,
   getVideoInfo,
   resolveBinariesSync,
   transformVideo
@@ -487,16 +488,24 @@ ipcMain.handle('library:readAsBase64', (_e, rel: string) => {
 
 ipcMain.handle('library:rootDir', () => library.libRoot())
 
-ipcMain.handle('library:getSourceVideoUrl', (_e, importId: string) => {
+ipcMain.handle('library:getSourceVideoUrl', async (_e, importId: string) => {
   const idx = library.list()
   const imp = idx.imports.find((r) => r.id === importId)
   if (!imp) return { ok: false, error: '来源不存在' }
   const exists = existsSync(imp.sourcePath)
+  let fps = 0
+  if (exists) {
+    const bins = resolveBinariesSync()
+    if (bins) {
+      fps = (await ffprobeVideoFps(bins.ffprobe, imp.sourcePath)) || 0
+    }
+  }
   return {
     ok: true,
     url: `scissor-source://${encodeURIComponent(importId)}/`,
     sourcePath: imp.sourcePath,
-    exists
+    exists,
+    fps
   }
 })
 
@@ -516,6 +525,12 @@ ipcMain.handle('library:deleteGroup', (_e, groupId: string) => {
 
 ipcMain.handle('library:renameGroup', (_e, payload: { groupId: string; name: string }) => {
   return { ok: library.doRenameGroup(payload.groupId, payload.name) }
+})
+ipcMain.handle('library:renameClip', (_e, payload: { clipId: string; name: string }) => {
+  return { ok: library.doRenameClip(payload.clipId, payload.name) }
+})
+ipcMain.handle('library:renameImport', (_e, payload: { importId: string; name: string }) => {
+  return { ok: library.doRenameImport(payload.importId, payload.name) }
 })
 
 ipcMain.handle(

@@ -9,12 +9,15 @@ type Props = {
   /** 把原始鼠标事件透出，方便父组件做 shift / cmd 范围选择 */
   onSelect?: (e: React.MouseEvent) => void
   onDelete?: () => void
+  onRename?: (clip: ClipMeta, name: string) => void
 }
 
-export function ClipCard({ clip, importColor, selected, onSelect, onDelete }: Props) {
+export function ClipCard({ clip, importColor, selected, onSelect, onDelete, onRename }: Props) {
   const [thumb, setThumb] = useState<string | null>(null)
   const [hovering, setHovering] = useState(false)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editName, setEditName] = useState(clip.name || '')
 
   useEffect(() => {
     let cancelled = false
@@ -74,9 +77,44 @@ export function ClipCard({ clip, importColor, selected, onSelect, onDelete }: Pr
         {selected && <div className="clip-card-checkmark">✓</div>}
       </div>
       <div className="clip-card-meta">
-        <span className="clip-card-dims">
-          {clip.width}×{clip.height}
-        </span>
+        {isEditing ? (
+          <input
+            className="clip-card-name-input"
+            autoFocus
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            onBlur={() => {
+              setIsEditing(false)
+              if (editName !== (clip.name || '')) {
+                onRename?.(clip, editName)
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.currentTarget.blur()
+              } else if (e.key === 'Escape') {
+                setEditName(clip.name || '')
+                setIsEditing(false)
+              }
+            }}
+            onClick={(e) => e.stopPropagation()}
+            placeholder="片段名称"
+          />
+        ) : (
+          <span
+            className="clip-card-name"
+            onDoubleClick={(e) => {
+              if (onRename) {
+                e.stopPropagation()
+                setIsEditing(true)
+                setEditName(clip.name || '')
+              }
+            }}
+            title={clip.name ? '双击重命名' : '双击添加名称'}
+          >
+            {clip.name || <span className="clip-card-dims">{clip.width}×{clip.height}</span>}
+          </span>
+        )}
         {clip.hasAudio && <span className="clip-card-audio">🔊</span>}
         {onDelete && (
           <button

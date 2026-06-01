@@ -410,6 +410,15 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
     reload()
   }
 
+  async function handleRenameClip(clip: ClipMeta, name: string): Promise<void> {
+    if (window.scissor.library.renameClip) {
+      await window.scissor.library.renameClip(clip.id, name)
+      reload()
+    } else {
+      console.warn('renameClip not available in preload')
+    }
+  }
+
   async function handleUpdateGroupDesc(g: ClipGroup, description: string): Promise<void> {
     await window.scissor.library.updateGroup(g.id, { description })
     reload()
@@ -495,11 +504,19 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
                           style={{ background: importColors.get(rec.id), marginRight: 0 }}
                         />
                       }
-                      label={basename(rec.sourcePath)}
+                      label={rec.name || basename(rec.sourcePath)}
                       count={rec.clipIds.length}
                       active={category === cat}
                       onClick={() => setCategory(cat)}
-                      title={rec.sourcePath}
+                      title={rec.name ? `${rec.name} (${rec.sourcePath})` : rec.sourcePath}
+                      onRename={async (newName) => {
+                        if (window.scissor.library.renameImport) {
+                          await window.scissor.library.renameImport(rec.id, newName)
+                          reload()
+                        } else {
+                          console.warn('renameImport not available')
+                        }
+                      }}
                     />
                     <button
                       type="button"
@@ -640,6 +657,7 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
                             importColor={importColors.get(u.clip.importId) ?? '#666'}
                             selected={selectedClips.has(u.clip.id)}
                             onSelect={(e) => handleClipClick(i, e)}
+                            onRename={handleRenameClip}
                           />
                         )
                       }
@@ -665,6 +683,7 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
                                 importColor={color}
                                 selected={selectedClips.has(c.id)}
                                 onSelect={(e) => handleClipClick(i, e)}
+                                onRename={handleRenameClip}
                               />
                             )
                           })}
@@ -899,7 +918,7 @@ export function RandomCutPanel({ ffmpegOk, luts }: Props) {
                       <div key={rec.id} className="manual-cut-source-row">
                         <div className="manual-cut-source-info">
                           <span className="source-dot" style={{ background: importColors.get(rec.id) }} />
-                          <span className="name" title={rec.sourcePath}>{basename(rec.sourcePath)}</span>
+                          <span className="name" title={rec.name ? `${rec.name} (${rec.sourcePath})` : rec.sourcePath}>{rec.name || basename(rec.sourcePath)}</span>
                           <span className="time">{rec.clipIds.length}段已切 · {new Date(rec.importedAt).toLocaleDateString()}</span>
                         </div>
                         <button
@@ -936,7 +955,8 @@ function CategoryRow({
   count,
   active,
   onClick,
-  title
+  title,
+  onRename
 }: {
   icon: React.ReactNode
   label: string
@@ -944,16 +964,51 @@ function CategoryRow({
   active: boolean
   onClick: () => void
   title?: string
+  onRename?: (newName: string) => void
 }) {
+  const [isEditing, setIsEditing] = useState(false)
+  const [editName, setEditName] = useState(label)
+
   return (
     <button
       type="button"
       className={`randomcut-cat-row ${active ? 'active' : ''}`}
       onClick={onClick}
       title={title}
+      onDoubleClick={(e) => {
+        if (onRename) {
+          e.stopPropagation()
+          setIsEditing(true)
+          setEditName(label)
+        }
+      }}
     >
       <span className="randomcut-cat-icon">{icon}</span>
-      <span className="randomcut-cat-label">{label}</span>
+      {isEditing ? (
+        <input
+          className="randomcut-cat-name-input"
+          autoFocus
+          value={editName}
+          onChange={(e) => setEditName(e.target.value)}
+          onBlur={() => {
+            setIsEditing(false)
+            if (editName !== label) {
+              onRename?.(editName)
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.currentTarget.blur()
+            } else if (e.key === 'Escape') {
+              setEditName(label)
+              setIsEditing(false)
+            }
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ) : (
+        <span className="randomcut-cat-label">{label}</span>
+      )}
       <span className="randomcut-cat-count">{count}</span>
     </button>
   )

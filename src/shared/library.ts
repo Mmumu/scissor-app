@@ -55,6 +55,8 @@ export type ImportRecord = {
   clipIds: string[]
   /** 关联的音频 id（若 audioMode='extract'） */
   audioId?: string
+  /** 自定义显示名称 */
+  name?: string
 }
 
 export type ClipMeta = {
@@ -80,6 +82,8 @@ export type ClipMeta = {
   tags?: string[]
   /** 用户是否标记收藏 */
   starred?: boolean
+  /** 视频片段自定义名称 */
+  name?: string
 }
 
 export type AudioMeta = {

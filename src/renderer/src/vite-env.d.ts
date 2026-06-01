@@ -128,7 +128,7 @@ declare global {
         getSourceVideoUrl: (
           importId: string
         ) => Promise<
-          | { ok: true; url: string; sourcePath: string; exists: boolean }
+          | { ok: true; url: string; sourcePath: string; exists: boolean; fps: number }
           | { ok: false; error: string }
         >
         createGroup: (input: {

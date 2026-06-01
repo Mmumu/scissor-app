@@ -3,7 +3,7 @@
 import { existsSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ClipGroup, ImportOptions, ImportProgressEvent, LibraryIndex, LibraryStats } from '../../shared/library'
-import { bootstrap, computeStats, createGroup, deleteGroup, readIndex, removeAudios, removeClips, removeImport, renameGroup, updateGroup } from './index-store'
+import { bootstrap, computeStats, createGroup, deleteGroup, readIndex, removeAudios, removeClips, removeImport, renameGroup, renameClip, renameImport, updateGroup } from './index-store'
 import { importVideos } from './import'
 import { importStandaloneAudio } from './audio-import'
 import { libraryRoot, resolveRel } from './paths'
@@ -88,6 +88,14 @@ export function doDeleteGroup(groupId: string): { ok: boolean } {
 
 export function doRenameGroup(groupId: string, name: string): { ok: boolean } {
   return { ok: renameGroup(groupId, name) }
+}
+
+export function doRenameClip(clipId: string, name: string): { ok: boolean } {
+  return { ok: renameClip(clipId, name) }
+}
+
+export function doRenameImport(importId: string, name: string): { ok: boolean } {
+  return { ok: renameImport(importId, name) }
 }
 
 export function doUpdateGroup(

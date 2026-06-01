@@ -5,7 +5,8 @@ import { spawn } from 'node:child_process'
 import {
   ffprobeDuration,
   ffprobeHasAudio,
-  ffprobeVideoDims
+  ffprobeVideoDims,
+  ffprobeVideoFps
 } from '../ffmpeg-utils'
 import type {
   AudioMeta,
@@ -125,8 +126,13 @@ async function importSingle(
       if (segments.length === 0) segments.push({ startSec: 0, endSec: duration })
     }
 
-    // 切点时间（除掉起点 0）：这些时间会被强制变成关键帧 + segment_times
-    const cutTimes = segments.slice(1).map((s) => s.startSec)
+    // 强制把所有手动片段的起点和终点都设为关键帧，以保证切割精确
+    const boundaryTimes = new Set<number>()
+    for (const s of segments) {
+      if (s.startSec > 0 && s.startSec < duration) boundaryTimes.add(s.startSec)
+      if (s.endSec > 0 && s.endSec < duration) boundaryTimes.add(s.endSec)
+    }
+    const cutTimes = Array.from(boundaryTimes).sort((a, b) => a - b)
 
     // ② 清洗：剥 metadata + 重编码 + force_key_frames 精准对齐
     const cleanedPath = join(tmpWork, 'cleaned.mp4')
@@ -143,17 +149,16 @@ async function importSingle(
       signal
     )
 
-    // ③ segment muxer：因为 ② 已经在 cutTimes 处插入了关键帧，这里 -c copy 能精确切
+    // ③ 精确切割：利用 force_key_frames 插入的关键帧，通过 -c copy 无损且高精度地提取各片段
     onProgress({ phase: 'segmenting', sourcePath, importId, pct: 0 })
     const segDir = join(tmpWork, 'segs')
     mkdirSync(segDir, { recursive: true })
-    const cutSecsCsv = cutTimes.map((t) => t.toFixed(3)).join(',')
-    await runSegment(
+    await runSegmentExtract(
       ffmpeg,
+      ffprobe,
       cleanedPath,
       segDir,
-      cutSecsCsv,
-      duration,
+      segments,
       hasAudio,
       (pct) => onProgress({ phase: 'segmenting', sourcePath, importId, pct }),
       signal
@@ -343,42 +348,55 @@ function runCleanup(
   return runFf(ffmpeg, args, totalDur, onPct, signal)
 }
 
-function runSegment(
+function segmentFrameIndex(sec: number, fps: number): number {
+  return Math.floor(sec * fps + 1e-3)
+}
+
+async function runSegmentExtract(
   ffmpeg: string,
+  ffprobe: string,
   src: string,
   segDir: string,
-  cutSecsCsv: string,
-  totalDur: number,
+  segments: { startSec: number; endSec: number }[],
   withAudio: boolean,
   onPct: (pct: number) => void,
   signal?: AbortSignal
 ): Promise<void> {
-  const outPattern = join(segDir, 'seg_%03d.mp4')
-  const args: string[] = [
-    '-hide_banner',
-    '-loglevel',
-    'error',
-    '-stats',
-    '-i',
-    src,
-    '-c',
-    'copy',
-    ...(withAudio ? [] : ['-an']),
-    '-map',
-    '0',
-    '-f',
-    'segment',
-    ...(cutSecsCsv.length > 0 ? ['-segment_times', cutSecsCsv] : []),
-    '-reset_timestamps',
-    '1',
-    '-segment_format',
-    'mp4',
-    '-segment_format_options',
-    'movflags=+faststart',
-    '-y',
-    outPattern
-  ]
-  return runFf(ffmpeg, args, totalDur, onPct, signal)
+  const fps = (await ffprobeVideoFps(ffprobe, src)) || 30
+  const total = segments.length
+  for (let i = 0; i < total; i++) {
+    if (signal?.aborted) break
+    const seg = segments[i]
+    const startIdx = segmentFrameIndex(seg.startSec, fps)
+    const endIdx = segmentFrameIndex(seg.endSec, fps)
+    const numFrames = endIdx - startIdx
+    if (numFrames <= 0) {
+      console.warn('[library] skip empty segment:', seg)
+      continue
+    }
+    const dst = join(segDir, `seg_${String(i).padStart(3, '0')}.mp4`)
+    const startSec = startIdx / fps
+    const args = [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-ss',
+      startSec.toFixed(6),
+      '-i',
+      src,
+      '-frames:v',
+      String(numFrames),
+      '-c',
+      'copy',
+      ...(withAudio ? [] : ['-an']),
+      '-movflags',
+      '+faststart',
+      '-y',
+      dst
+    ]
+    await runFf(ffmpeg, args, 0, () => undefined, signal)
+    onPct((i + 1) / total)
+  }
 }
 
 function runAudioExtract(

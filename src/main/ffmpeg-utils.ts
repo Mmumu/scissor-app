@@ -171,6 +171,41 @@ export async function ffprobeHasAudio(ffprobe: string, path: string): Promise<bo
   return out.length > 0
 }
 
+function parseFpsRate(rate: string | undefined): number {
+  if (!rate || rate === '0/0') return 0
+  const parts = rate.split('/')
+  if (parts.length !== 2) return 0
+  const num = Number(parts[0])
+  const den = Number(parts[1])
+  if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) return 0
+  return num / den
+}
+
+/** 读取视频帧率（优先 avg_frame_rate，回退 r_frame_rate） */
+export async function ffprobeVideoFps(ffprobe: string, path: string): Promise<number> {
+  try {
+    const args = [
+      '-v',
+      'error',
+      '-select_streams',
+      'v:0',
+      '-show_entries',
+      'stream=avg_frame_rate,r_frame_rate',
+      '-of',
+      'default=noprint_wrappers=1:nokey=1',
+      path
+    ]
+    const out = (await spawnWithStdout(ffprobe, args)).trim()
+    const lines = out.split('\n').map((l) => l.trim()).filter(Boolean)
+    const avg = parseFpsRate(lines[0])
+    const r = parseFpsRate(lines[1])
+    const fps = avg > 0 ? avg : r
+    return fps > 0 && Number.isFinite(fps) ? fps : 0
+  } catch {
+    return 0
+  }
+}
+
 export async function ffprobeVideoDims(
   ffprobe: string,
   path: string

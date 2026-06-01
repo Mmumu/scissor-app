@@ -106,6 +106,22 @@ export function removeImport(importId: string): void {
   })
 }
 
+export function renameImport(importId: string, name: string): boolean {
+  let ok = false
+  mutate((i) => {
+    const r = i.imports.find((x) => x.id === importId)
+    if (!r) return
+    const trimmed = name.trim()
+    if (trimmed) {
+      r.name = trimmed.slice(0, 64)
+    } else {
+      delete r.name
+    }
+    ok = true
+  })
+  return ok
+}
+
 export function removeClips(ids: string[]): ClipMeta[] {
   const removed: ClipMeta[] = []
   mutate((i) => {
@@ -210,6 +226,22 @@ export function deleteGroup(groupId: string): boolean {
 
 export function renameGroup(groupId: string, name: string): boolean {
   return updateGroup(groupId, { name })
+}
+
+export function renameClip(clipId: string, name: string): boolean {
+  let ok = false
+  mutate((i) => {
+    const c = i.clips.find((x) => x.id === clipId)
+    if (!c) return
+    const trimmed = name.trim()
+    if (trimmed) {
+      c.name = trimmed.slice(0, 32)
+    } else {
+      delete c.name
+    }
+    ok = true
+  })
+  return ok
 }
 
 export function updateGroup(

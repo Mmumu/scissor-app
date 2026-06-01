@@ -22,7 +22,31 @@ type Props = {
 type MarkedSegment = {
   id: string
   startSec: number
+  /** exclusive end for ffmpeg (first frame NOT included) */
   endSec: number
+}
+
+const DEFAULT_FPS = 30
+
+function frameSec(fps: number): number {
+  return 1 / fps
+}
+
+/** 浮点时间 → 帧序号（29.97fps 等需容差，避免 99.999→99） */
+function frameIndexAt(sec: number, fps: number): number {
+  return Math.floor(sec * fps + 1e-3)
+}
+
+function frameTimeAtIndex(idx: number, fps: number): number {
+  return idx / fps
+}
+
+function snapToFrameStart(sec: number, fps: number): number {
+  return frameTimeAtIndex(frameIndexAt(sec, fps), fps)
+}
+
+function inclusiveEndFromExclusive(endSec: number, fps: number): number {
+  return frameTimeAtIndex(Math.max(0, frameIndexAt(endSec, fps) - 1), fps)
 }
 
 export function SourceGroupingModal({
@@ -39,6 +63,7 @@ export function SourceGroupingModal({
   const [sourcePath, setSourcePath] = useState<string>('')
   const [playhead, setPlayhead] = useState(0)
   const [vidDur, setVidDur] = useState(0)
+  const [videoFps, setVideoFps] = useState(DEFAULT_FPS)
   const [playing, setPlaying] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [groupName, setGroupName] = useState('')
@@ -51,6 +76,8 @@ export function SourceGroupingModal({
   const activeRangeRef = useRef<{ start: number; end: number } | null>(null)
   activeRangeRef.current = activeRange
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  /** 当前显示帧序号（逐帧/标记的唯一依据，避免 currentTime 浮点漂移） */
+  const displayFrameIdxRef = useRef(0)
   const lastThumbClickRef = useRef<number | null>(null)
 
   // 手动切片特有状态
@@ -93,6 +120,7 @@ export function SourceGroupingModal({
         return
       }
       setSourcePath(r.sourcePath)
+      if (r.fps > 0) setVideoFps(r.fps)
       if (!r.exists) {
         setSourceMissing(true)
         return
@@ -116,13 +144,14 @@ export function SourceGroupingModal({
     if (!el) return
     const syncTime = (): void => {
       const cur = el.currentTime || 0
+      displayFrameIdxRef.current = frameIndexAt(cur, videoFps)
       setPlayhead(cur)
 
-      // 手动区间循环预览模式
+      // 手动区间循环预览模式（出点为含帧，播放边界用 exclusive end）
       if (mode === 'cut' && loopPreview && inPoint !== null && outPoint !== null) {
         const start = Math.min(inPoint, outPoint)
-        const end = Math.max(inPoint, outPoint)
-        if (cur >= end || cur < start) {
+        const endExclusive = Math.max(inPoint, outPoint) + frameSec(videoFps)
+        if (cur >= endExclusive || cur < start) {
           el.currentTime = start
           setPlayhead(start)
         }
@@ -156,7 +185,7 @@ export function SourceGroupingModal({
       el.removeEventListener('pause', onPause)
       el.removeEventListener('loadedmetadata', onMeta)
     }
-  }, [videoUrl, mode, loopPreview, inPoint, outPoint])
+  }, [videoUrl, mode, loopPreview, inPoint, outPoint, videoFps])
 
   // 选区评估（沿用现有规则：必须 ≥2、同 import、连续）
   const groupingEval = useMemo(() => evaluateGrouping(index, selected), [index, selected])
@@ -186,20 +215,24 @@ export function SourceGroupingModal({
         setLoopPreview(false)
       }
       const cap = mode === 'group' ? (timelineDur || vidDur || sec) : (vidDur || sec)
-      const t = Math.max(0, Math.min(sec, cap))
+      let t = Math.max(0, Math.min(sec, cap))
+      if (mode === 'cut') t = snapToFrameStart(t, videoFps)
       const el = videoRef.current
       if (el) {
         try {
           el.currentTime = t
+          displayFrameIdxRef.current = frameIndexAt(el.currentTime, videoFps)
           setPlayhead(el.currentTime)
         } catch {
+          displayFrameIdxRef.current = frameIndexAt(t, videoFps)
           setPlayhead(t)
         }
       } else {
+        displayFrameIdxRef.current = frameIndexAt(t, videoFps)
         setPlayhead(t)
       }
     },
-    [timelineDur, vidDur, mode]
+    [timelineDur, vidDur, mode, videoFps]
   )
 
   function nearestBoundary(sec: number, side: 'lo' | 'hi'): number {
@@ -218,12 +251,36 @@ export function SourceGroupingModal({
     }
   }
 
+  /** 读取当前帧并标注入/出点（同步；暂停时 rVFC 不触发，必须直接读 currentTime） */
+  function applyMark(setPoint: (t: number) => void, label: string): void {
+    const el = videoRef.current
+    const fps = videoFps
+    const finish = (): void => {
+      const idx = el ? frameIndexAt(el.currentTime, fps) : displayFrameIdxRef.current
+      displayFrameIdxRef.current = idx
+      const t = frameTimeAtIndex(idx, fps)
+      if (el) el.currentTime = t
+      setPoint(t)
+      setPlayhead(t)
+      showToast(`${label} = ${formatTimecode(t)}`)
+    }
+    if (!el) {
+      finish()
+      return
+    }
+    el.pause()
+    if (el.seeking) {
+      el.addEventListener('seeked', () => finish(), { once: true })
+    } else {
+      finish()
+    }
+  }
+
   // 标入点/出点（吸附已有切片边界）
   const inPointRef = useRef<number | null>(null)
   function markIn(): void {
     if (mode === 'cut') {
-      setInPoint(playhead)
-      showToast(`入点 = ${formatTimecode(playhead)}`)
+      applyMark(setInPoint, '入点')
     } else {
       inPointRef.current = nearestBoundary(playhead, 'lo')
       showToast(`入点 = ${formatTimecode(inPointRef.current)}`)
@@ -231,8 +288,7 @@ export function SourceGroupingModal({
   }
   function markOut(): void {
     if (mode === 'cut') {
-      setOutPoint(playhead)
-      showToast(`出点 = ${formatTimecode(playhead)}`)
+      applyMark(setOutPoint, '出点')
     } else {
       if (inPointRef.current == null) {
         showToast('请先按 [ 标入点', 'err')
@@ -257,11 +313,19 @@ export function SourceGroupingModal({
   function stepFrame(frames: number): void {
     const el = videoRef.current
     if (!el) return
-    const fps = 25
-    const dt = frames * (1 / fps)
-    const next = Math.max(0, Math.min(vidDur, el.currentTime + dt))
+    el.pause()
+    const fps = videoFps
+    const maxFrame = Math.max(0, frameIndexAt(vidDur, fps))
+    const nextFrame = Math.max(0, Math.min(maxFrame, displayFrameIdxRef.current + frames))
+    displayFrameIdxRef.current = nextFrame
+    const next = frameTimeAtIndex(nextFrame, fps)
+    const onSeeked = (): void => {
+      el.removeEventListener('seeked', onSeeked)
+      displayFrameIdxRef.current = frameIndexAt(el.currentTime, fps)
+      setPlayhead(frameTimeAtIndex(displayFrameIdxRef.current, fps))
+    }
+    el.addEventListener('seeked', onSeeked)
     el.currentTime = next
-    setPlayhead(next)
   }
 
   // 添加片段到待切片队列
@@ -270,19 +334,27 @@ export function SourceGroupingModal({
       showToast('请先完整标注入点与出点', 'err')
       return
     }
-    const start = Math.min(inPoint, outPoint)
-    const end = Math.max(inPoint, outPoint)
-    if (end - start < 0.2) {
+    const startIdx = frameIndexAt(Math.min(inPoint, outPoint), videoFps)
+    const endIdx = frameIndexAt(Math.max(inPoint, outPoint), videoFps)
+    const start = frameTimeAtIndex(startIdx, videoFps)
+    const endExclusive = frameTimeAtIndex(endIdx + 1, videoFps)
+    if (endIdx < startIdx) {
+      showToast('出点必须在入点之后', 'err')
+      return
+    }
+    if (endExclusive - start < 0.2) {
       showToast('标记的片段太短，需大于 0.2 秒', 'err')
       return
     }
     const id = `seg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-    setMarkedSegments((prev) => [...prev, { id, startSec: start, endSec: end }].sort((a, b) => a.startSec - b.startSec))
+    setMarkedSegments((prev) =>
+      [...prev, { id, startSec: start, endSec: endExclusive }].sort((a, b) => a.startSec - b.startSec)
+    )
     setInPoint(null)
     setOutPoint(null)
     setLoopPreview(false)
     showToast('片段已成功加入待切片队列')
-  }, [inPoint, outPoint])
+  }, [inPoint, outPoint, videoFps])
 
   // 键盘快捷键
   useEffect(() => {
@@ -700,7 +772,7 @@ export function SourceGroupingModal({
                     </strong>
                     {inPoint !== null && outPoint !== null && (
                       <>
-                        <span className="dur-badge">{Math.abs(outPoint - inPoint).toFixed(2)}s</span>
+                        <span className="dur-badge">{((Math.max(0, frameIndexAt(outPoint, videoFps) - frameIndexAt(inPoint, videoFps)) + 1) * frameSec(videoFps)).toFixed(2)}s</span>
                         <button
                           type="button"
                           className={`ghost-btn xs ${loopPreview ? 'active' : ''}`}
@@ -748,7 +820,7 @@ export function SourceGroupingModal({
                         <span className="cut-item-idx">#{idx + 1}</span>
                         <div className="cut-item-meta">
                           <div className="cut-item-range">
-                            {formatTimecode(seg.startSec)} ➔ {formatTimecode(seg.endSec)}
+                            {formatTimecode(seg.startSec)} ➔ {formatTimecode(inclusiveEndFromExclusive(seg.endSec, videoFps))}
                           </div>
                           <div className="cut-item-dur">时长：{(seg.endSec - seg.startSec).toFixed(2)}s</div>
                         </div>

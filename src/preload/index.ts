@@ -172,7 +172,7 @@ contextBridge.exposeInMainWorld('scissor', {
     getSourceVideoUrl: (
       importId: string
     ): Promise<
-      | { ok: true; url: string; sourcePath: string; exists: boolean }
+      | { ok: true; url: string; sourcePath: string; exists: boolean; fps: number }
       | { ok: false; error: string }
     > => ipcRenderer.invoke('library:getSourceVideoUrl', importId),
     createGroup: (input: {
@@ -186,6 +186,10 @@ contextBridge.exposeInMainWorld('scissor', {
       ipcRenderer.invoke('library:deleteGroup', groupId),
     renameGroup: (groupId: string, name: string): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke('library:renameGroup', { groupId, name }),
+    renameClip: (clipId: string, name: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('library:renameClip', { clipId, name }),
+    renameImport: (importId: string, name: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('library:renameImport', { importId, name }),
     updateGroup: (
       groupId: string,
       patch: { name?: string; description?: string }
